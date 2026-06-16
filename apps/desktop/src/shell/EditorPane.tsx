@@ -1,17 +1,46 @@
-/* Editor pane — static mockup content ported 1:1 (mockup .editor-pane).
-   The real CodeMirror 6 editor with live decorations lands in Phase 3;
-   this increment proves the pane's visual contract. */
+/* Editor pane — mockup chrome (breadcrumb / title / meta / backlinks) as React,
+   with a live CodeMirror 6 host in place of the static body. */
 
-export function EditorPane() {
+import type { BacklinkDto, NoteDto } from '../ipc';
+import { CodeMirrorHost } from '../editor/CodeMirrorHost';
+
+interface Props {
+  note: NoteDto | null;
+  doc: string;
+  backlinks: BacklinkDto[];
+  onChangeDoc: (doc: string) => void;
+  onOpenPath: (path: string) => void;
+  onWikiClick: (target: string) => void;
+}
+
+function relativeTime(mtimeMs: number): string {
+  const days = Math.floor((Date.now() - mtimeMs) / 86_400_000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  return `${days} days ago`;
+}
+
+export function EditorPane({ note, doc, backlinks, onChangeDoc, onOpenPath, onWikiClick }: Props) {
+  const segments = note ? note.path.split('/').slice(0, -1) : [];
+  const fm = (note?.frontmatter ?? null) as Record<string, unknown> | null;
+  const dateStr =
+    typeof fm?.date === 'string'
+      ? fm.date
+      : note
+        ? new Date(note.mtime).toLocaleDateString()
+        : '';
+
   return (
     <div className="editor-pane">
       <div className="editor-header">
         <div className="breadcrumb">
-          <span className="bc-seg">research-notes</span>
-          <span className="bc-sep">›</span>
-          <span className="bc-seg">neuroscience</span>
-          <span className="bc-sep">›</span>
-          <span className="bc-current">synaptic pruning</span>
+          {segments.map((seg, i) => (
+            <span key={i} style={{ display: 'contents' }}>
+              <span className="bc-seg">{seg}</span>
+              <span className="bc-sep">›</span>
+            </span>
+          ))}
+          <span className="bc-current">{note?.title ?? 'No note open'}</span>
         </div>
         <div className="editor-actions">
           <button className="ea-btn" title="Outline" type="button">≡</button>
@@ -21,84 +50,43 @@ export function EditorPane() {
       </div>
 
       <div className="editor-body selectable">
-        <div className="note-title">Synaptic pruning</div>
-        <div className="note-meta">
-          <span>📅 Jun 12 2026</span>
-          <span>⟳ 2 days ago</span>
-          <span>◈ 847 words</span>
-          <span>↙ 4 backlinks</span>
-        </div>
+        <div className="note-title">{note?.title ?? 'No note open'}</div>
+        {note && (
+          <div className="note-meta">
+            <span>📅 {dateStr}</span>
+            <span>⟳ {relativeTime(note.mtime)}</span>
+            <span>◈ {note.word_count} words</span>
+            <span>↙ {backlinks.length} backlinks</span>
+          </div>
+        )}
 
-        <div className="note-body">
-          <p>
-            <span className="tag">#neuroscience</span> <span className="tag">#development</span>
-          </p>
-          <p>
-            Synaptic pruning is the process by which extra neurons and synaptic connections are
-            eliminated in order to increase the efficiency of neuronal transmissions. The process
-            begins in the 2nd trimester of fetal development and continues into early adulthood.
-          </p>
-          <p>
-            The <span className="wikilink">[[prefrontal cortex]]</span> undergoes significant
-            pruning during adolescence, which may explain why risk assessment and impulse control
-            are still developing into the mid-20s. This connects directly to work on{' '}
-            <span className="wikilink">[[neural plasticity]]</span> and the{' '}
-            <span className="wikilink">[[critical period hypothesis]]</span>.
-          </p>
-          <h2>Mechanisms</h2>
-          <p>
-            Microglia actively engulf synapses tagged with complement proteins C1q and C3, in a
-            process called <span className="inline-code">complement-mediated pruning</span>. This is
-            activity-dependent — synapses that fire together, survive together.
-          </p>
-          <p>
-            Recent work on <span className="wikilink">[[long-term potentiation]]</span> suggests
-            that pruning is not passive decay but an active sculpting process. See{' '}
-            <span className="wikilink">[[Hebb's rule]]</span> for the foundational theory.
-          </p>
-          <h2>Clinical relevance</h2>
-          <p>
-            Dysregulation has been implicated in{' '}
-            <span className="wikilink">[[schizophrenia]]</span> (excess pruning) and{' '}
-            <span className="wikilink">[[autism spectrum disorder]]</span> (insufficient pruning).
-            The <span className="inline-code">C4A</span> gene variant is a key risk factor.
-          </p>
-          <p className="cursor-line">This may also intersect with findings from</p>
-        </div>
+        <CodeMirrorHost
+          className="note-body cm-host"
+          doc={doc}
+          notePath={note?.path ?? null}
+          onChangeDoc={onChangeDoc}
+          onWikiClick={onWikiClick}
+        />
 
-        <div className="backlinks">
-          <div className="bl-label">Backlinks · 4</div>
-          <div className="bl-item">
-            <div className="bl-dot" />
-            <div>
-              <div className="bl-title">Neural plasticity</div>
-              <div className="bl-excerpt">
-                ...synaptic pruning refines the circuits established during the critical period,
-                eliminating redundant pathways...
-              </div>
-            </div>
+        {backlinks.length > 0 && (
+          <div className="backlinks">
+            <div className="bl-label">Backlinks · {backlinks.length}</div>
+            {backlinks.map((b) => (
+              <button
+                key={b.src_path}
+                className="bl-item"
+                type="button"
+                onClick={() => onOpenPath(b.src_path)}
+              >
+                <div className={`bl-dot${b.link_type !== 'wikilink' ? ' bl-dot-violet' : ''}`} />
+                <div>
+                  <div className="bl-title">{b.src_title}</div>
+                  <div className="bl-excerpt">{b.src_path}</div>
+                </div>
+              </button>
+            ))}
           </div>
-          <div className="bl-item">
-            <div className="bl-dot bl-dot-violet" />
-            <div>
-              <div className="bl-title">Schizophrenia — etiology overview</div>
-              <div className="bl-excerpt">
-                ...excess synaptic pruning during adolescent development, mediated by complement
-                cascade dysregulation...
-              </div>
-            </div>
-          </div>
-          <div className="bl-item">
-            <div className="bl-dot bl-dot-violet" />
-            <div>
-              <div className="bl-title">Adolescent brain development</div>
-              <div className="bl-excerpt">
-                ...the prefrontal cortex is among the last regions to complete synaptic pruning,
-                explaining delayed...
-              </div>
-            </div>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

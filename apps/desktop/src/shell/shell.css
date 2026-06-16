@@ -237,6 +237,7 @@
   transition: all var(--dur-norm) var(--ease);
 }
 .bl-item:hover { border-color: var(--border-mid); background: var(--surface-2); }
+button.bl-item { width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
 .bl-dot {
   width: 6px;
   height: 6px;

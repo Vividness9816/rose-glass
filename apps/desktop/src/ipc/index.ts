@@ -61,6 +61,12 @@ export const getTags = () => invoke<TagCount[]>('get_tags');
 export const getGraphPayload = () => invoke<GraphPayload>('get_graph_payload');
 export const reindex = () => invoke<OpenVaultResult>('reindex');
 
+export const readNoteFile = (path: string) => invoke<string>('read_note_file', { path });
+export const saveNoteFile = (path: string, content: string) =>
+  invoke<void>('save_note_file', { path, content });
+export const resolveLink = (target: string, srcPath: string) =>
+  invoke<string | null>('resolve_link', { target, srcPath });
+
 export const onIndexNote = (
   cb: (e: { path: string; op: 'upsert' | 'delete' }) => void,
 ): Promise<UnlistenFn> =>

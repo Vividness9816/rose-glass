@@ -1,0 +1,52 @@
+/* CodeMirror host + live-preview marks. Mirrors shell.css .wikilink/.tag/.inline-code
+   1:1 (caret/selection live in theme.ts). Tokens only — re-themes on data-theme flip. */
+
+.cm-editor {
+  height: 100%;
+  background: transparent;
+}
+.cm-editor .cm-content {
+  font-family: var(--font-ui);
+  max-width: 620px;
+  padding: 0;
+}
+.cm-editor.cm-focused {
+  outline: none;
+}
+.cm-host {
+  min-height: 240px;
+}
+.cm-scroller {
+  font-family: var(--font-ui);
+}
+
+.cm-wikilink {
+  color: var(--rose-bright);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--rose-glow-sm);
+  padding: 1px 5px;
+  border-radius: 3px;
+  border-bottom: 1px solid var(--border-strong);
+  transition: all var(--dur-fast) var(--ease);
+  cursor: pointer;
+}
+.cm-wikilink:hover {
+  background: var(--rose-glow);
+}
+.cm-tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--violet-bright);
+  background: var(--violet-glow);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.cm-inline-code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--surface-3);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
