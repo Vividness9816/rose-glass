@@ -89,35 +89,49 @@
 }
 
 /* ── LIGHT THEME ──────────────────────────────────────────────────────
-   ponytail: untuned first pass — proves the live-toggle MECHANISM only.
-   The mockup ships zero light tokens, so final light values are net-new
-   design work deferred to the Taste increment (STATUS: dual-theme diff = NOT-DONE).
-   Only the values below change when light is properly designed; structure is final. */
+   Tuned (Phase 6). The mockup ships zero light tokens, so these are net-new.
+   Key design move: the dark theme leans on BRIGHT accents (rose/violet-bright)
+   that pop on near-black; on a light base those vanish, so emphasis accents are
+   remapped DARKER here (bright→deep), text contrast is raised, and graph node
+   cores go dark so the graph reads as ink on light paper. Structure is final;
+   only values live here (reskin = edit this block, zero component edits — A10). */
 :root[data-theme='light'] {
+  /* Surfaces — warm near-white elevations, restrained so rose accents pop */
   --bg:          #fdf2f4;
-  --bg-2:        #fae8ec;
-  --surface-1:   #f5dde3;
-  --surface-2:   #efd0d8;
-  --surface-3:   #e8c2cd;
-  --surface-4:   #e0b3c0;
+  --bg-2:        #f8e9ed;
+  --surface-1:   #f5e2e7;
+  --surface-2:   #eed5dc;
+  --surface-3:   #e6c8d0;
+  --surface-4:   #d9b6c1;
 
-  --rose-glow:   rgba(244,63,94,0.12);
-  --rose-glow-sm:rgba(244,63,94,0.06);
-  --violet-glow: rgba(168,85,247,0.10);
+  /* Accents remapped for contrast ON LIGHT (bright is for dark; here emphasis = deeper) */
+  --rose:        #e11d48;
+  --rose-bright: #be1846; /* "emphasis" text/links — must be darker than body to read on light */
+  --rose-dim:    #9f1239;
+  --violet:      #7c3aed;
+  --violet-bright:#6d28d9;
+  --crimson:     #9f1239;
+  --orange:      #c2570a; /* graph cluster-2 — deepened so it reads on the light field */
 
-  --text-1:  #2e0a14;
-  --text-2:  #6b2f3d;
-  --text-3:  #9a6470;
-  --text-4:  #c79aa6;
+  --rose-glow:   rgba(225,29,72,0.12);
+  --rose-glow-sm:rgba(225,29,72,0.06);
+  --violet-glow: rgba(124,58,237,0.10);
 
-  --border:       rgba(190,24,70,0.12);
-  --border-mid:   rgba(190,24,70,0.20);
-  --border-strong:rgba(190,24,70,0.32);
+  /* Text — strong contrast on the warm-white base */
+  --text-1:  #2a0810;
+  --text-2:  #5c2531;
+  --text-3:  #895562;
+  --text-4:  #bf95a1;
+
+  --border:       rgba(159,18,57,0.12);
+  --border-mid:   rgba(159,18,57,0.22);
+  --border-strong:rgba(159,18,57,0.34);
   --border-white: rgba(0,0,0,0.06);
 
   --glass-bg:     rgba(253,242,244,0.72);
-  --glass-border: rgba(190,24,70,0.16);
+  --glass-border: rgba(159,18,57,0.16);
 
+  /* Graph: light field, dark node cores (ink-on-paper), deep cluster rings */
   --graph-bg:        var(--bg);
-  --graph-node-core: #fff7f9;
+  --graph-node-core: #2a0810;
 }
