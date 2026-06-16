@@ -39,3 +39,10 @@ States: ✅ proven · 🟡 partial · 🟥 stubbed · ⬜ untouched
 - Frameless window: native edge-resize reduced on Windows; upgrade = resize handles / `tauri-plugin-decorum`.
 - Graph canvas at CSS-px resolution (not yet 4K/dpr) — fixed-4K buffer lands with WebGPU (`phase4-webgpu`).
 - `favicon.ico` 404 in dev console — cosmetic; add a favicon when chrome is finalized.
+
+### Phase 2 review — deferred (low/speculative or future-phase)
+- **mtime gate-1** skips the hash check when mtime is unchanged → a content edit that preserves mtime (coarse FS, mtime-restoring editors) is skipped until a full rebuild. Acceptable perf gate; revisit if it bites.
+- **Tags starting with a digit** (`#3d`, `#1password`) are rejected by the TAG regex (requires a leading letter); `norm_tag` keeps a trailing `/`/`-`. Minor index inaccuracy.
+- **Path-traversal targets** (`[x](../../etc/passwd)`) parse to dangling (never used as FS paths in P2) — when the link-follow feature lands, canonicalize + assert inside vault root.
+- **Symlinked .md files** are indexed under their in-vault relpath (out-of-vault content can enter the index); **non-UTF-8 filenames** are silently skipped (no log). Add observability when it matters.
+- **Watcher worker** has no UI health signal if its connection hits a fatal error (errors are now logged, not silently dropped); **mpsc channel** is unbounded under a save-storm. Revisit with the activity pane (Phase 8).
