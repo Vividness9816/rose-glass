@@ -17,6 +17,7 @@ import {
   toLf,
 } from '../editor/logic';
 import { GraphPane } from '../graph/GraphPane';
+import { Backdrop } from '../backdrop/Backdrop';
 import { CommandPalette } from '../command/CommandPalette';
 import { Titlebar } from './Titlebar';
 import { IconRail } from './IconRail';
@@ -222,6 +223,8 @@ export function Shell() {
   }, [refreshGraph]);
 
   return (
+    <>
+    <Backdrop theme={theme} />
     <div className="app-shell">
       <Titlebar vault={vault} onSearch={openPalette} />
       <IconRail />
@@ -245,5 +248,6 @@ export function Shell() {
       />
       {paletteOpen && <CommandPalette onClose={closePalette} onOpenNote={openNote} />}
     </div>
+    </>
   );
 }

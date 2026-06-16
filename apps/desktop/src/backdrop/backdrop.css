@@ -1,0 +1,13 @@
+/* Static fallback backdrop — token-driven, theme-aware (CSS vars flip on [data-theme]).
+   Used for prefers-reduced-motion and as the WebGL failure fallback. A restrained
+   ambient wash that matches the mockup's vibe (anti-pattern #10: don't overrule it). */
+.backdrop-static {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 50% at 28% 18%, var(--rose-glow) 0%, transparent 70%),
+    radial-gradient(55% 45% at 78% 72%, var(--violet-glow) 0%, transparent 72%),
+    var(--bg);
+}

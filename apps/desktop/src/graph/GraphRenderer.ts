@@ -8,6 +8,10 @@
 import type { GraphData, GraphEdge, GraphNode } from './types';
 import { type GraphTheme, rgba } from './themeColors';
 
+/** Graph-field opacity over the §21 living backdrop. 1 = opaque (backdrop hidden),
+    lower = more motion bleeds through. The user's visibility dial for Phase 6. */
+const GRAPH_BG_ALPHA = 0.55;
+
 interface Particle {
   e: GraphEdge;
   t: number;
@@ -129,7 +133,10 @@ export class GraphRenderer {
     const clusterRgb = (c: number) => theme.clusters[c]?.rgb ?? theme.clusters[0].rgb;
 
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = theme.bg;
+    // ponytail: translucent (was opaque theme.bg) so the §21 living backdrop shows
+    // through behind the graph — the graph floats in the gradient field. The alpha keeps
+    // node/edge contrast; lower it to reveal more motion, raise it to mute the backdrop.
+    ctx.fillStyle = rgba(theme.bgRgb, GRAPH_BG_ALPHA);
     ctx.fillRect(0, 0, W, H);
 
     // ambient radial wash (cluster 0 + 1 hues)

@@ -1,7 +1,9 @@
 /* Graph pane chrome — ported from mockup .graph-pane / .graph-header (lines 207-257). */
 
 .graph-pane {
-  background: var(--bg);
+  /* transparent (was var(--bg)) so the §21 living backdrop shows through the
+     translucent graph canvas behind it; the canvas paints the dark field at GRAPH_BG_ALPHA. */
+  background: transparent;
   border-right: 1px solid var(--border);
   position: relative;
   overflow: hidden;

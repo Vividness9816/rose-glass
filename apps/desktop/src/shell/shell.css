@@ -8,6 +8,7 @@
   grid-template-columns: 52px 1fr;
   overflow: hidden;
   position: relative;
+  z-index: 1; /* sits above the z-index:0 living Backdrop; solid panes occlude it, glass chrome refracts it */
 }
 
 /* button reset for the chrome controls */

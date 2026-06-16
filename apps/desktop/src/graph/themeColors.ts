@@ -10,6 +10,7 @@ export type RGB = [number, number, number];
 
 export interface GraphTheme {
   bg: string;
+  bgRgb: RGB; // same as bg, kept as a triple so the canvas can fill it translucent (let the §21 backdrop through)
   nodeCore: string;
   clusters: { accent: string; rgb: RGB }[];
   crossEdge: RGB;
@@ -44,6 +45,7 @@ export function resolveGraphTheme(): GraphTheme {
   const core = resolve('var(--graph-node-core)');
   return {
     bg: `rgb(${bg[0]},${bg[1]},${bg[2]})`,
+    bgRgb: bg,
     nodeCore: `rgb(${core[0]},${core[1]},${core[2]})`,
     clusters,
     crossEdge: resolve('var(--graph-cross-edge)'),
