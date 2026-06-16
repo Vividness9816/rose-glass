@@ -138,7 +138,10 @@ pub async fn read_note_file(state: State<'_, AppState>, path: String) -> Result<
         .ok_or_else(|| IpcError("no vault open".into()))?;
     let abs = crate::fs_safe::safe_join(&root, &path)?;
     let bytes = std::fs::read(&abs)?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    // strict UTF-8: never open a buffer we can't write back faithfully (a lossy
+    // read + save would silently corrupt non-UTF-8 files on the first keystroke)
+    String::from_utf8(bytes)
+        .map_err(|_| IpcError("file is not valid UTF-8; cannot open for editing".into()))
 }
 
 #[tauri::command]
@@ -157,6 +160,7 @@ pub async fn save_note_file(
     use std::io::Write;
     tmp.write_all(content.as_bytes())?;
     tmp.flush()?;
+    tmp.as_file().sync_all()?; // fsync data before the atomic rename (crash-durable)
     tmp.persist(&abs).map_err(|e| IpcError(e.to_string()))?;
     Ok(())
 }

@@ -5,12 +5,18 @@
 use std::path::{Component, Path, PathBuf};
 
 pub fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
+    if rel.trim().is_empty() {
+        return Err("empty path".into());
+    }
     let rel_path = Path::new(rel);
     if rel_path.is_absolute() {
         return Err("absolute paths are not allowed".into());
     }
-    if rel_path.components().any(|c| matches!(c, Component::ParentDir)) {
-        return Err("path traversal ('..') is not allowed".into());
+    if rel_path
+        .components()
+        .any(|c| matches!(c, Component::ParentDir | Component::CurDir))
+    {
+        return Err("path traversal ('..'/'.') is not allowed".into());
     }
     let root_canon = root
         .canonicalize()
@@ -30,6 +36,12 @@ pub fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
     };
     if !check.starts_with(&root_canon) {
         return Err("path escapes the vault root".into());
+    }
+    if check == root_canon {
+        return Err("path resolves to the vault root, not a file".into());
+    }
+    if check.is_dir() {
+        return Err("target is a directory, not a file".into());
     }
     Ok(check)
 }
@@ -62,6 +74,16 @@ mod tests {
         // absolute path
         let abs = if cfg!(windows) { "C:/Windows/system.ini" } else { "/etc/passwd" };
         assert!(safe_join(root, abs).is_err());
+    }
+
+    #[test]
+    fn rejects_empty_and_directory_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        assert!(safe_join(root, "").is_err()); // empty → not a file
+        assert!(safe_join(root, ".").is_err()); // current dir
+        assert!(safe_join(root, "sub").is_err()); // existing directory, not a file
     }
 
     #[test]

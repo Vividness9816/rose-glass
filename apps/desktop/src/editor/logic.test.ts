@@ -1,5 +1,27 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { extractWikiTarget, firstNotePath, makeDebouncedSaver, shouldReloadDoc } from './logic';
+import {
+  applyEol,
+  detectEol,
+  extractWikiTarget,
+  firstNotePath,
+  makeDebouncedSaver,
+  shouldReloadDoc,
+  toLf,
+} from './logic';
+
+describe('EOL handling', () => {
+  it('detects CRLF vs LF', () => {
+    expect(detectEol('a\r\nb')).toBe('\r\n');
+    expect(detectEol('a\nb')).toBe('\n');
+  });
+  it('normalizes to LF and re-applies the original ending (identity round-trip)', () => {
+    const crlf = 'x\r\ny\r\nz';
+    expect(toLf(crlf)).toBe('x\ny\nz');
+    expect(applyEol(toLf(crlf), detectEol(crlf))).toBe(crlf);
+    const lf = 'x\ny\nz';
+    expect(applyEol(toLf(lf), detectEol(lf))).toBe(lf);
+  });
+});
 
 describe('extractWikiTarget', () => {
   it('strips alias and heading', () => {

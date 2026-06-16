@@ -7,7 +7,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getStoredTheme, toggleTheme, type Theme } from '../appearance/theme';
 import type { GraphData } from '../graph/types';
 import { payloadToGraphData } from '../graph/fromPayload';
-import { firstNotePath, makeDebouncedSaver, shouldReloadDoc } from '../editor/logic';
+import {
+  applyEol,
+  detectEol,
+  type Eol,
+  firstNotePath,
+  makeDebouncedSaver,
+  shouldReloadDoc,
+  toLf,
+} from '../editor/logic';
 import { GraphPane } from '../graph/GraphPane';
 import { Titlebar } from './Titlebar';
 import { IconRail } from './IconRail';
@@ -43,15 +51,20 @@ export function Shell() {
 
   const openNotePathRef = useRef<string | null>(null);
   const isDirtyRef = useRef(false);
-  const lastSavedRef = useRef<string | null>(null);
+  const lastSavedRef = useRef<string | null>(null); // disk form (original EOL)
+  const eolRef = useRef<Eol>('\n');
 
   const saver = useMemo(
     () =>
       makeDebouncedSaver(async (p, c) => {
         try {
           await saveNoteFile(p, c);
-          lastSavedRef.current = c;
-          isDirtyRef.current = false;
+          // only commit clean/echo state if this note is still the open one
+          // (a late save of a switched-away note must not corrupt the new note's state)
+          if (openNotePathRef.current === p) {
+            lastSavedRef.current = c;
+            isDirtyRef.current = false;
+          }
         } catch (e) {
           console.error('save failed:', e);
         }
@@ -76,14 +89,15 @@ export function Shell() {
     async (path: string) => {
       try {
         saver.flush(); // persist any pending edit to the previous note first
-        const content = await readNoteFile(path);
+        const raw = await readNoteFile(path); // disk bytes (strict UTF-8), original EOL
         const [n, bl] = await Promise.all([getNote(path), getBacklinks(path)]);
         openNotePathRef.current = path;
+        eolRef.current = detectEol(raw);
         isDirtyRef.current = false;
-        lastSavedRef.current = content;
+        lastSavedRef.current = raw;
         setNote(n);
         setBacklinks(bl);
-        setDoc(content);
+        setDoc(toLf(raw)); // editor works in LF; original EOL re-applied on save
       } catch (e) {
         console.error('open note failed:', e);
       }
@@ -93,9 +107,10 @@ export function Shell() {
 
   const onChangeDoc = useCallback(
     (text: string) => {
-      if (!openNotePathRef.current) return;
+      const p = openNotePathRef.current;
+      if (!p) return;
       isDirtyRef.current = true;
-      saver.schedule(openNotePathRef.current, text);
+      saver.schedule(p, applyEol(text, eolRef.current)); // write with the file's original EOL
     },
     [saver],
   );
@@ -136,11 +151,23 @@ export function Shell() {
     onIndexNote(async (e) => {
       void refreshGraph();
       if (e.path !== openNotePathRef.current) return;
+      // open note was deleted on disk → clear to the empty state
+      if (e.op === 'delete') {
+        openNotePathRef.current = null;
+        isDirtyRef.current = false;
+        lastSavedRef.current = null;
+        setNote(null);
+        setBacklinks([]);
+        setDoc('');
+        return;
+      }
       try {
         const [n, bl] = await Promise.all([getNote(e.path), getBacklinks(e.path)]);
+        if (openNotePathRef.current !== e.path) return; // switched notes mid-flight
         setNote(n);
         setBacklinks(bl);
         const disk = await readNoteFile(e.path);
+        if (openNotePathRef.current !== e.path) return;
         if (
           shouldReloadDoc({
             eventPath: e.path,
@@ -150,8 +177,9 @@ export function Shell() {
             diskContent: disk,
           })
         ) {
+          eolRef.current = detectEol(disk);
           lastSavedRef.current = disk;
-          setDoc(disk);
+          setDoc(toLf(disk));
         }
       } catch (err) {
         console.error('index refresh failed:', err);

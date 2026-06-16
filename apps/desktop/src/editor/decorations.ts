@@ -7,28 +7,46 @@ import {
   type ViewUpdate,
 } from '@codemirror/view';
 
-// Wikilink/embed: ![[...]] | [[...]]  (alias/# kept inside, painted whole).
-// Tag: mirrors the Rust parser's TAG — boundary, FIRST char a letter, then
-//      letters/digits/_/-//, so highlighting == indexing (no leading digit, no ##).
-// Inline code: `code` (single backtick, no embedded backtick/newline).
-const TOKEN_RE = /(!?\[\[[^\]\n]+?\]\])|(?:^|[^\w&;#/])(#\p{L}[\p{L}\p{N}/_-]*)|(`[^`\n]+?`)/gu;
+export type TokenKind = 'wikilink' | 'tag' | 'inline-code';
+export interface Token {
+  start: number;
+  len: number;
+  kind: TokenKind;
+}
 
-const wikilinkMark = Decoration.mark({ class: 'cm-wikilink' });
-const tagMark = Decoration.mark({ class: 'cm-tag' });
-const inlineCodeMark = Decoration.mark({ class: 'cm-inline-code' });
+// inline-code is tried BEFORE tag so `#x` is a code span, not a backtick-bounded
+// tag (the tag boundary class would otherwise eat the opening backtick).
+// Tag rule mirrors the Rust indexer's TAG (letter-first). NOTE: multi-line code
+// FENCES are not masked here — a wikilink/tag inside a ``` block is still painted
+// (cosmetic only; clicking resolves via the backend index, so inert links no-op).
+const TOKEN_RE = /(!?\[\[[^\]\n]+?\]\])|(`[^`\n]+?`)|(?:^|[^\w&;#/])(#\p{L}[\p{L}\p{N}/_-]*)/gu;
+
+/** Pure tokenizer over a single text slice — unit-tested in decorations.test.ts. */
+export function scanTokens(text: string): Token[] {
+  const out: Token[] = [];
+  TOKEN_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = TOKEN_RE.exec(text))) {
+    const token = m[1] ?? m[2] ?? m[3];
+    if (!token) continue;
+    const kind: TokenKind = m[1] ? 'wikilink' : m[2] ? 'inline-code' : 'tag';
+    out.push({ start: m.index + m[0].indexOf(token), len: token.length, kind });
+  }
+  return out;
+}
+
+const MARKS: Record<TokenKind, Decoration> = {
+  wikilink: Decoration.mark({ class: 'cm-wikilink' }),
+  tag: Decoration.mark({ class: 'cm-tag' }),
+  'inline-code': Decoration.mark({ class: 'cm-inline-code' }),
+};
 
 function buildDecorations(view: EditorView): DecorationSet {
   const b = new RangeSetBuilder<Decoration>();
   for (const { from, to } of view.visibleRanges) {
     const text = view.state.doc.sliceString(from, to);
-    TOKEN_RE.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = TOKEN_RE.exec(text))) {
-      const token = m[1] ?? m[2] ?? m[3];
-      if (!token) continue;
-      const start = from + m.index + m[0].indexOf(token); // skip the boundary char
-      const mark = m[1] ? wikilinkMark : m[2] ? tagMark : inlineCodeMark;
-      b.add(start, start + token.length, mark);
+    for (const t of scanTokens(text)) {
+      b.add(from + t.start, from + t.start + t.len, MARKS[t.kind]);
     }
   }
   return b.finish();

@@ -31,6 +31,24 @@ export function firstNotePath(nodes: { path: string }[]): string | undefined {
   return nodes.map((n) => n.path).sort()[0];
 }
 
+export type Eol = '\r\n' | '\n';
+
+/** The file's dominant line ending (CRLF if any present). */
+export function detectEol(s: string): Eol {
+  return s.includes('\r\n') ? '\r\n' : '\n';
+}
+
+/** Normalize to LF for the editor buffer + all in-memory comparisons. */
+export function toLf(s: string): string {
+  return s.replace(/\r\n/g, '\n');
+}
+
+/** Re-apply the file's original line ending before writing to disk, so a one-char
+ *  edit never silently rewrites every line (the app must not reformat the file). */
+export function applyEol(lf: string, eol: Eol): string {
+  return eol === '\r\n' ? lf.replace(/\n/g, '\r\n') : lf;
+}
+
 export interface DebouncedSaver {
   schedule(path: string, content: string): void;
   flush(): void;
