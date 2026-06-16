@@ -1,0 +1,110 @@
+/* ⌘K command palette — ported from the mockup .cmd-palette (lines 539-585) + overlay. */
+
+.cmd-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(2px);
+}
+
+.cmd-palette {
+  width: 90%;
+  max-width: 560px;
+  background: var(--glass-bg);
+  border: 1px solid var(--border-mid);
+  border-radius: var(--r-xl);
+  backdrop-filter: blur(32px);
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--rose-glow-sm);
+}
+
+.cmd-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.cmd-icon {
+  font-size: 14px;
+  color: var(--text-3);
+}
+.cmd-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 14px;
+  font-family: var(--font-ui);
+  color: var(--text-1);
+}
+.cmd-input::placeholder {
+  color: var(--text-3);
+}
+
+.cmd-results {
+  padding: 6px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.cmd-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  cursor: default;
+  transition: all var(--dur-fast) var(--ease);
+}
+.cmd-result:hover,
+.cmd-result.focused {
+  background: var(--rose-glow-sm);
+}
+.cmd-result.focused {
+  background: var(--rose-glow);
+}
+.cmd-result-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.cmd-result-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-1);
+}
+.cmd-result-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+.cmd-result-kbd {
+  margin-left: auto;
+  display: flex;
+  gap: 3px;
+}
+.kbd {
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-mid);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-3);
+}
+.cmd-empty {
+  padding: 14px 16px;
+  font-size: 13px;
+  color: var(--text-3);
+}

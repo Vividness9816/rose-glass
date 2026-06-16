@@ -17,6 +17,7 @@ import {
   toLf,
 } from '../editor/logic';
 import { GraphPane } from '../graph/GraphPane';
+import { CommandPalette } from '../command/CommandPalette';
 import { Titlebar } from './Titlebar';
 import { IconRail } from './IconRail';
 import { EditorPane } from './EditorPane';
@@ -48,6 +49,7 @@ export function Shell() {
   const [note, setNote] = useState<NoteDto | null>(null);
   const [backlinks, setBacklinks] = useState<BacklinkDto[]>([]);
   const [doc, setDoc] = useState('');
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   const openNotePathRef = useRef<string | null>(null);
   const isDirtyRef = useRef(false);
@@ -73,6 +75,18 @@ export function Shell() {
   );
 
   const onToggleTheme = () => setThemeState(toggleTheme(theme));
+
+  // ⌘K / Ctrl+K toggles the command palette
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const refreshGraph = useCallback(async (): Promise<GraphPayload | null> => {
     try {
@@ -198,7 +212,7 @@ export function Shell() {
 
   return (
     <div className="app-shell">
-      <Titlebar vault={vault} />
+      <Titlebar vault={vault} onSearch={() => setPaletteOpen(true)} />
       <IconRail />
       <div className="main-area">
         <GraphPane theme={theme} data={graphData} onOpenVault={openVaultFlow} />
@@ -218,6 +232,9 @@ export function Shell() {
         theme={theme}
         onToggleTheme={onToggleTheme}
       />
+      {paletteOpen && (
+        <CommandPalette onClose={() => setPaletteOpen(false)} onOpenNote={openNote} />
+      )}
     </div>
   );
 }

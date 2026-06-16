@@ -13,7 +13,7 @@ async function windowAction(action: 'close' | 'minimize' | 'toggleMaximize') {
   }
 }
 
-export function Titlebar({ vault }: { vault: string }) {
+export function Titlebar({ vault, onSearch }: { vault: string; onSearch?: () => void }) {
   return (
     <div className="titlebar" data-tauri-drag-region>
       <div className="traffic-lights">
@@ -38,7 +38,7 @@ export function Titlebar({ vault }: { vault: string }) {
       </div>
       <div className="title-center">{vault} — Rose Glass</div>
       <div className="titlebar-right">
-        <button className="tb-btn" type="button">⌘K Search</button>
+        <button className="tb-btn" type="button" onClick={onSearch}>⌘K Search</button>
         <button className="tb-btn" type="button">↗ Share</button>
         <button className="tb-btn primary" type="button">+ New note</button>
       </div>
