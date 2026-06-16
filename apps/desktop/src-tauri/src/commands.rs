@@ -1,12 +1,13 @@
-//! IPC surface. Heavy work (rebuild) runs in async commands off the UI thread;
-//! every DB lock is scoped and dropped before any emit/await (no guard across await).
+//! IPC surface. Heavy work (rebuild) runs in async commands off the UI thread.
+//! All writes go through the shared `Arc<Mutex<Connection>>`, so the Mutex
+//! serializes commands with the watcher worker (single-writer in practice).
 
-use crate::db::{self, queries};
 use crate::db::queries::{
-    BacklinkDto, GraphPayload, NoteDto, OpenVaultResultDto, SearchHit, TagCount,
+    self, BacklinkDto, GraphPayload, NoteDto, OpenVaultResultDto, SearchHit, TagCount,
 };
+use crate::db::{self};
 use crate::indexer::pipeline;
-use crate::state::AppState;
+use crate::state::{lock, AppState};
 use crate::watcher;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -48,21 +49,22 @@ pub async fn open_vault(
     }
     let db_dir = root.join(".rose-glass");
     std::fs::create_dir_all(&db_dir)?;
+    // Keep the derived cache out of the user's vault git repo.
+    let _ = std::fs::write(db_dir.join(".gitignore"), "*\n");
     let db_path = db_dir.join("index.db");
 
     let mut conn = db::open_db(&db_path)?;
     db::migrate(&conn)?;
     let count = pipeline::full_rebuild(&mut conn, &root)?;
 
-    {
-        *state.db.lock().unwrap() = conn;
-        *state.vault_root.lock().unwrap() = Some(root.clone());
-    }
+    // Stop the old watcher BEFORE swapping/spawning so there's never a transient
+    // double-watcher on the same DB.
+    *lock(&state.watcher) = None;
+    *lock(&state.db) = conn;
+    *lock(&state.vault_root) = Some(root.clone());
 
-    let w = watcher::spawn(root.clone(), db_path, app.clone())?;
-    {
-        *state.watcher.lock().unwrap() = Some(w);
-    }
+    let watcher = watcher::spawn(root.clone(), state.db.clone(), app.clone())?;
+    *lock(&state.watcher) = Some(watcher);
 
     let _ = app.emit("index:rebuilt", serde_json::json!({ "note_count": count }));
     Ok(OpenVaultResultDto {
@@ -77,12 +79,12 @@ pub async fn reindex(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<OpenVaultResultDto, IpcError> {
-    let root = state.vault_root.lock().unwrap().clone();
+    let root = lock(&state.vault_root).clone();
     let Some(root) = root else {
         return Err(IpcError("no vault open".into()));
     };
     let count = {
-        let mut db = state.db.lock().unwrap();
+        let mut db = lock(&state.db);
         pipeline::full_rebuild(&mut db, &root)?
     };
     let _ = app.emit("index:rebuilt", serde_json::json!({ "note_count": count }));
@@ -98,7 +100,7 @@ pub async fn get_note(
     state: State<'_, AppState>,
     path: String,
 ) -> Result<Option<NoteDto>, IpcError> {
-    let db = state.db.lock().unwrap();
+    let db = lock(&state.db);
     Ok(queries::get_note(&db, &path)?)
 }
 
@@ -107,24 +109,24 @@ pub async fn get_backlinks(
     state: State<'_, AppState>,
     path: String,
 ) -> Result<Vec<BacklinkDto>, IpcError> {
-    let db = state.db.lock().unwrap();
+    let db = lock(&state.db);
     Ok(queries::get_backlinks(&db, &path)?)
 }
 
 #[tauri::command]
 pub async fn search(state: State<'_, AppState>, query: String) -> Result<Vec<SearchHit>, IpcError> {
-    let db = state.db.lock().unwrap();
+    let db = lock(&state.db);
     Ok(queries::search_fts(&db, &query)?)
 }
 
 #[tauri::command]
 pub async fn get_tags(state: State<'_, AppState>) -> Result<Vec<TagCount>, IpcError> {
-    let db = state.db.lock().unwrap();
+    let db = lock(&state.db);
     Ok(queries::get_tags(&db)?)
 }
 
 #[tauri::command]
 pub async fn get_graph_payload(state: State<'_, AppState>) -> Result<GraphPayload, IpcError> {
-    let db = state.db.lock().unwrap();
+    let db = lock(&state.db);
     Ok(queries::get_graph_payload(&db)?)
 }

@@ -1,14 +1,17 @@
-//! FS watcher → debounced events → a worker thread that owns the writer connection
-//! and applies incremental/delete, emitting `index:note` per real change.
+//! FS watcher → debounced events → a worker thread that applies incremental/delete
+//! through the SHARED DB connection (so writes serialize with IPC commands via the
+//! Mutex — no second-writer contention), emitting `index:note` per real change.
 
-use crate::db;
 use crate::indexer::pipeline;
 use crate::indexer::IndexOutcome;
+use crate::state::lock;
 use notify_debouncer_full::new_debouncer;
 use notify_debouncer_full::notify::{EventKind, RecursiveMode};
+use rusqlite::Connection;
 use std::any::Any;
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
@@ -18,31 +21,34 @@ enum Op {
 }
 
 /// Spawn the watcher. The returned boxed value must be held alive (in AppState) —
-/// dropping it stops watching and closes the worker channel.
+/// dropping it closes the worker channel and stops watching.
 pub fn spawn(
     vault_root: PathBuf,
-    db_path: PathBuf,
+    db: Arc<Mutex<Connection>>,
     app: AppHandle,
 ) -> Result<Box<dyn Any + Send>, String> {
     let (tx, rx) = mpsc::channel::<Op>();
 
-    // worker thread: owns the single writer connection
     let worker_root = vault_root.clone();
     std::thread::spawn(move || {
-        let Ok(mut conn) = db::open_db(&db_path) else {
-            return;
-        };
         while let Ok(op) = rx.recv() {
             let (rel, kind) = match &op {
                 Op::Reindex(r) => (r.clone(), "upsert"),
                 Op::Delete(r) => (r.clone(), "delete"),
             };
-            let res = match &op {
-                Op::Reindex(r) => pipeline::incremental(&mut conn, &worker_root, r),
-                Op::Delete(r) => pipeline::delete(&mut conn, r),
+            let res = {
+                let mut conn = lock(&db); // shared connection — serializes with commands
+                match &op {
+                    Op::Reindex(r) => pipeline::incremental(&mut conn, &worker_root, r),
+                    Op::Delete(r) => pipeline::delete(&mut conn, r),
+                }
             };
-            if matches!(res, Ok(o) if o != IndexOutcome::Skipped) {
-                let _ = app.emit("index:note", serde_json::json!({ "path": rel, "op": kind }));
+            match res {
+                Ok(o) if o != IndexOutcome::Skipped => {
+                    let _ = app.emit("index:note", serde_json::json!({ "path": rel, "op": kind }));
+                }
+                Ok(_) => {}
+                Err(e) => eprintln!("[rose-glass] index op failed for {rel}: {e}"),
             }
         }
     });

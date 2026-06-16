@@ -70,7 +70,9 @@ pub fn full_rebuild(conn: &mut Connection, vault_root: &Path) -> rusqlite::Resul
     let mut stash: Vec<(String, Vec<super::RawLink>)> = Vec::new();
     for entry in WalkDir::new(vault_root)
         .into_iter()
-        .filter_entry(|e| !is_hidden(e))
+        // always keep the root (depth 0) — the vault folder itself may be dot-prefixed;
+        // only prune hidden SUB-entries (.git/.rose-glass/.obsidian/…)
+        .filter_entry(|e| e.depth() == 0 || !is_hidden(e))
         .filter_map(|e| e.ok())
     {
         if !entry.file_type().is_file() || !is_markdown(entry.path()) {
@@ -160,7 +162,8 @@ pub fn incremental(
         .collect();
     queries::replace_links(&tx, rel, &resolved)?;
     if was_new {
-        queries::relink_dangling(&tx, &idx)?;
+        // the path set grew → other links' stem resolution may change
+        queries::reresolve_links(&tx, &idx)?;
     }
     tx.commit()?;
     Ok(IndexOutcome::Indexed)
@@ -169,6 +172,10 @@ pub fn incremental(
 pub fn delete(conn: &mut Connection, rel: &str) -> rusqlite::Result<IndexOutcome> {
     let tx = conn.transaction()?;
     queries::delete_note(&tx, rel)?;
+    // the path set shrank → re-resolve all links against survivors so links
+    // orphaned by ON DELETE SET NULL re-point to surviving stem siblings (A3 parity)
+    let idx = queries::load_note_index(&tx)?;
+    queries::reresolve_links(&tx, &idx)?;
     tx.commit()?;
     Ok(IndexOutcome::Deleted)
 }
@@ -299,6 +306,57 @@ mod tests {
             .iter()
             .any(|b| b.src_path == "x.md"));
         assert_eq!(count(&conn, "SELECT COUNT(*) FROM links WHERE dst_path IS NULL"), 1); // only z
+    }
+
+    #[test]
+    fn incremental_matches_full_rebuild_under_stem_collision() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("a")).unwrap();
+        std::fs::create_dir_all(root.join("b")).unwrap();
+        std::fs::write(root.join("a/Note.md"), b"alpha").unwrap();
+        std::fs::write(root.join("b/Note.md"), b"beta").unwrap();
+        std::fs::write(root.join("ref.md"), b"points to [[Note]]").unwrap();
+
+        let mut full = mem();
+        full_rebuild(&mut full, root).unwrap();
+        let want: Option<String> = full
+            .query_row("SELECT dst_path FROM links WHERE src_path='ref.md'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(want.as_deref(), Some("a/Note.md")); // lexicographically smallest
+
+        // incremental in an order that first resolves to b, then adds the smaller a
+        let mut inc = mem();
+        incremental(&mut inc, root, "b/Note.md").unwrap();
+        incremental(&mut inc, root, "ref.md").unwrap();
+        let mid: Option<String> = inc
+            .query_row("SELECT dst_path FROM links WHERE src_path='ref.md'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(mid.as_deref(), Some("b/Note.md")); // only candidate so far
+        incremental(&mut inc, root, "a/Note.md").unwrap(); // adding smaller sibling must re-point
+        let got: Option<String> = inc
+            .query_row("SELECT dst_path FROM links WHERE src_path='ref.md'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(got, want, "incremental add must converge to full-rebuild resolution");
+    }
+
+    #[test]
+    fn delete_winner_repoints_to_surviving_sibling() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("a")).unwrap();
+        std::fs::create_dir_all(root.join("b")).unwrap();
+        std::fs::write(root.join("a/Note.md"), b"alpha").unwrap();
+        std::fs::write(root.join("b/Note.md"), b"beta").unwrap();
+        std::fs::write(root.join("ref.md"), b"points to [[Note]]").unwrap();
+
+        let mut conn = mem();
+        full_rebuild(&mut conn, root).unwrap(); // ref → a/Note.md
+        delete(&mut conn, "a/Note.md").unwrap();
+        let got: Option<String> = conn
+            .query_row("SELECT dst_path FROM links WHERE src_path='ref.md'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(got.as_deref(), Some("b/Note.md"), "must re-point, not dangle");
     }
 
     // ── A3: delete DB → rebuild → equivalent index ──────────────────────────

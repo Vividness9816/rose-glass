@@ -204,9 +204,14 @@ fn extract_links(masked: &str, body: &str) -> Vec<RawLink> {
         if url.is_empty() || url.contains("://") || url.starts_with('#') {
             continue; // external / intra-page anchor — not a vault link
         }
+        // strip a trailing #fragment so the relative target resolves (mirror wikilinks)
+        let target = url.split('#').next().unwrap_or(url).trim();
+        if target.is_empty() {
+            continue;
+        }
         links.push(RawLink {
-            dst_raw: url.to_string(),
-            target: url.to_string(),
+            dst_raw: target.to_string(),
+            target: target.to_string(),
             link_type: LinkType::Markdown,
         });
     }
@@ -260,8 +265,9 @@ pub fn parse_note(rel_path: &str, bytes: &[u8]) -> ParsedNote {
     let fm = parse_frontmatter_json(fm_src.as_deref());
     let frontmatter_json = fm.as_ref().map(|v| serde_json::to_string(v).unwrap());
 
-    let title = title(fm.as_ref(), &body, rel_path);
     let masked = mask_code_and_urls(&body);
+    // title's H1 fallback must also ignore fenced/code regions → use the masked body
+    let title = title(fm.as_ref(), &masked, rel_path);
     let links = extract_links(&masked, &body);
     let tags = extract_tags(&masked, fm.as_ref());
     let fts = fts_body(&body);
@@ -369,5 +375,22 @@ mod tests {
             parse_note("a.md", b"abc").content_hash,
             parse_note("a.md", b"abd").content_hash
         );
+    }
+
+    #[test]
+    fn h1_inside_code_fence_is_not_title() {
+        // no frontmatter + no real H1 → filename, NOT the fenced heading
+        let p = parse_note("real-name.md", b"intro\n```\n# Fake Heading\n```\nmore");
+        assert_eq!(p.title, "real-name");
+        // a genuine H1 still wins
+        let p = parse_note("n.md", b"# Real Title\n```\n# fenced\n```");
+        assert_eq!(p.title, "Real Title");
+    }
+
+    #[test]
+    fn markdown_link_fragment_is_stripped() {
+        let p = parse_note("n.md", b"see [x](sub/note.md#section)");
+        assert!(has_link(&p, "sub/note.md", LinkType::Markdown));
+        assert!(!p.links.iter().any(|l| l.target.contains('#')));
     }
 }

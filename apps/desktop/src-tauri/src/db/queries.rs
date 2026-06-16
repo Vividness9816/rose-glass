@@ -153,26 +153,26 @@ pub fn delete_note(tx: &Transaction, path: &str) -> rusqlite::Result<()> {
     Ok(())
 }
 
-/// Re-resolve every currently-dangling link against the (now-updated) note set,
-/// setting dst_path where it resolves. This is what makes incremental converge to
-/// full-rebuild: a link written before its target existed resolves once it appears.
-pub fn relink_dangling(tx: &Transaction, idx: &NoteIndex) -> rusqlite::Result<()> {
-    let danglers: Vec<(i64, String, String)> = {
-        let mut stmt =
-            tx.prepare("SELECT rowid, src_path, dst_raw FROM links WHERE dst_path IS NULL")?;
+/// Re-resolve EVERY link against the given note set, rewriting dst_path to the
+/// resolved value (which may be NULL). Called after a note is added or deleted —
+/// the path set changed, so stem-collision winners and dangling links can flip.
+/// Re-resolving all links (not just NULL ones) is what makes incremental produce
+/// the SAME result as a full rebuild (the A3 invariant) under stem ties.
+pub fn reresolve_links(tx: &Transaction, idx: &NoteIndex) -> rusqlite::Result<()> {
+    let all: Vec<(i64, String, String)> = {
+        let mut stmt = tx.prepare("SELECT rowid, src_path, dst_raw FROM links")?;
         let rows = stmt.query_map([], |r| {
             Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
         })?;
         rows.collect::<rusqlite::Result<_>>()?
     };
-    for (rowid, src, dst_raw) in danglers {
+    for (rowid, src, dst_raw) in all {
         let target = dst_raw.split('#').next().unwrap_or(&dst_raw).trim();
-        if let Some(p) = resolve(target, &src, idx) {
-            tx.execute(
-                "UPDATE links SET dst_path=?1 WHERE rowid=?2",
-                params![p, rowid],
-            )?;
-        }
+        let dst = resolve(target, &src, idx);
+        tx.execute(
+            "UPDATE links SET dst_path=?1 WHERE rowid=?2",
+            params![dst, rowid],
+        )?;
     }
     Ok(())
 }
@@ -348,7 +348,7 @@ pub fn get_graph_payload(conn: &Connection) -> rusqlite::Result<GraphPayload> {
     let edges: Vec<GraphEdgeMeta> = {
         let mut stmt = conn.prepare(
             "SELECT DISTINCT src_path AS src, dst_path AS dst
-             FROM links WHERE dst_path IS NOT NULL",
+             FROM links WHERE dst_path IS NOT NULL AND dst_path <> src_path",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(GraphEdgeMeta {
