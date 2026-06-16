@@ -1,0 +1,3 @@
+packages:
+  - 'apps/*'
+  # packages/* added when the first shared package exists (ADR-20260616: no empty packages)

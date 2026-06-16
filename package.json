@@ -1,0 +1,12 @@
+{
+  "name": "rose-glass",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Local-first PKM that is also a live mirror of Claude Code activity",
+  "scripts": {
+    "dev": "pnpm --filter @rose-glass/desktop tauri dev",
+    "build": "pnpm --filter @rose-glass/desktop build",
+    "tsc": "pnpm --filter @rose-glass/desktop exec tsc --noEmit",
+    "test": "pnpm --filter @rose-glass/desktop test"
+  }
+}

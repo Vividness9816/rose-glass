@@ -1,0 +1,23 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+apps/desktop/dist/
+
+# Rust / Tauri
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+
+# logs / os
+*.log
+.DS_Store
+Thumbs.db
+
+# editor
+.idea/
+
+# local env / secrets (never commit)
+.env
+.env.*

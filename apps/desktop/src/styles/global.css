@@ -1,0 +1,25 @@
+/* Base layer — resets + body + scrollbars. Tokens only, no raw values. */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root { height: 100%; }
+
+body {
+  font-family: var(--font-ui);
+  background: var(--bg);
+  color: var(--text-1);
+  line-height: 1.5;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  transition: background var(--dur-norm) var(--ease), color var(--dur-norm) var(--ease);
+}
+
+/* 4px rose-tinted scrollbars (mockup §10.4) */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface-4); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--surface-3); }
+
+/* Editor body text is selectable; chrome is not. */
+.selectable { user-select: text; }
