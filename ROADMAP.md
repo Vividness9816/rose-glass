@@ -10,7 +10,7 @@ with a riskiest-premise spike on a tiny scope before its build.
 | 1 | `phase1-shell` | Titlebar / 52px rail / split / statusbar 1:1 from mockup | ✅ done (this session) |
 | 4(2D) | `phase4-graph` | Canvas-2D living graph ported, de-hardcoded, on mock data (the §20 2D-fallback leg) | ✅ done (this session) |
 | 2 | `phase2-indexer` | Vault open + watcher + indexer + SQLite schema (§8); incremental + full-rebuild | ✅ done (A3 proven; review pass pending) |
-| 3 | `phase3-editor` | CodeMirror 6 editor pane (mockup parity), save path, live links/backlinks | ⬜ |
+| 3 | `phase3-editor` | CodeMirror 6 editor pane (mockup parity), save path, live links/backlinks | ✅ done (review pending) |
 | 4 | `phase4-webgpu` | WebGPU renderer at fixed 4K + drag node/cluster + zoom/pan + click-open; **spike: React19×design-libs + WebGPU 4K probe + fallback** | ⬜ |
 | 5 | `phase5-search` | FTS5 search + ⌘K command palette (mockup glass) | ⬜ |
 | 6 | `phase6-glass` | Theme-aware shadergradient backdrop + dashersw glass + backdrop-filter surfaces; light-theme tuning + dual-theme diffs | ⬜ |
