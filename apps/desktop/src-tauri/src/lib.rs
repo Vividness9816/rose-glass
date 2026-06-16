@@ -1,5 +1,6 @@
 mod commands;
 mod db;
+mod fs_safe;
 mod indexer;
 mod state;
 mod watcher;
@@ -28,6 +29,9 @@ pub fn run() {
             commands::search,
             commands::get_tags,
             commands::get_graph_payload,
+            commands::read_note_file,
+            commands::save_note_file,
+            commands::resolve_link,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

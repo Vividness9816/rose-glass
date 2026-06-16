@@ -130,3 +130,43 @@ pub async fn get_graph_payload(state: State<'_, AppState>) -> Result<GraphPayloa
     let db = lock(&state.db);
     Ok(queries::get_graph_payload(&db)?)
 }
+
+#[tauri::command]
+pub async fn read_note_file(state: State<'_, AppState>, path: String) -> Result<String, IpcError> {
+    let root = lock(&state.vault_root)
+        .clone()
+        .ok_or_else(|| IpcError("no vault open".into()))?;
+    let abs = crate::fs_safe::safe_join(&root, &path)?;
+    let bytes = std::fs::read(&abs)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+#[tauri::command]
+pub async fn save_note_file(
+    state: State<'_, AppState>,
+    path: String,
+    content: String,
+) -> Result<(), IpcError> {
+    let root = lock(&state.vault_root)
+        .clone()
+        .ok_or_else(|| IpcError("no vault open".into()))?;
+    let abs = crate::fs_safe::safe_join(&root, &path)?;
+    let dir = abs.parent().ok_or_else(|| IpcError("invalid target".into()))?;
+    // atomic: write a temp file in the same dir, then rename over the target
+    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+    use std::io::Write;
+    tmp.write_all(content.as_bytes())?;
+    tmp.flush()?;
+    tmp.persist(&abs).map_err(|e| IpcError(e.to_string()))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn resolve_link(
+    state: State<'_, AppState>,
+    target: String,
+    src_path: String,
+) -> Result<Option<String>, IpcError> {
+    let db = lock(&state.db);
+    Ok(queries::resolve_link(&db, &target, &src_path)?)
+}

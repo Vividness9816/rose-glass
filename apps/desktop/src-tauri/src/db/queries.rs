@@ -207,6 +207,18 @@ pub fn load_note_index(conn: &Connection) -> rusqlite::Result<NoteIndex> {
     Ok(NoteIndex::build(&paths))
 }
 
+/// Resolve a wikilink/markdown target to a vault path using the SAME logic the
+/// indexer uses for edges — so click-navigation and the graph agree. None = dangling.
+pub fn resolve_link(
+    conn: &Connection,
+    target: &str,
+    src_path: &str,
+) -> rusqlite::Result<Option<String>> {
+    let idx = load_note_index(conn)?;
+    let t = target.split('#').next().unwrap_or(target).trim();
+    Ok(resolve(t, src_path, &idx))
+}
+
 pub fn get_note(conn: &Connection, path: &str) -> rusqlite::Result<Option<NoteDto>> {
     let base = conn
         .query_row(
