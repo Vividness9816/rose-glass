@@ -9,8 +9,8 @@ States: ✅ proven · 🟡 partial · 🟥 stubbed · ⬜ untouched
 
 | Id | §20 acceptance item | State | Evidence (commit scope + artifact) |
 |---|---|---|---|
-| A1 | Boots clean, no runtime errors, `tsc` passes, unit tests green, Ponytail audit clean | 🟡 | `tsc` 0; `vitest` 22/22; `vite build` 0; `cargo test` 24/24 + `cargo clippy` 0 warnings (`phase3-editor`). Remaining: live `tauri dev` window eyeball; formal `/ponytail-audit`. |
-| A2 | Playwright visual diffs (shell/graph/editor/⌘K), light+dark; Impeccable on un-mocked | 🟡 | Render captured both themes: `docs/proof/phase1-shell-{dark,light}.png` (`phase1-shell`). Remaining: automated screenshot-DIFF harness vs mockup; ⌘K; Impeccable run. |
+| A1 | Boots clean, no runtime errors, `tsc` passes, unit tests green, Ponytail audit clean | 🟡 | `tsc` 0; `vitest` 24/24; `vite build` 0; `cargo test` 24/24 + `cargo clippy` 0 warnings (`phase5-search`). Remaining: live `tauri dev` window eyeball; formal `/ponytail-audit`. |
+| A2 | Playwright visual diffs (shell/graph/editor/⌘K), light+dark; Impeccable on un-mocked | 🟡 | Render captured: shell `docs/proof/phase1-shell-{dark,light}.png`, editor `phase3-editor-decorations.png`, **⌘K palette `phase5-command-palette.png`** (`phase5-search`). Remaining: automated screenshot-DIFF harness vs mockup; Impeccable run. |
 | A3 | Delete SQLite DB → reboot → index rebuilds equivalent | ✅ | `cargo test indexer::pipeline::tests::a3_delete_db_rebuild_is_equivalent` passes — builds index, snapshots, deletes DB, rebuilds, asserts order-independent equivalence (`phase2-indexer`). |
 | A4 | Theme switches light/dark live, no reload, persisted | ✅ | Toggle flips `data-theme` + `--bg` `#0a0408`↔`#fdf2f4`, persists `localStorage app.theme`; `docs/proof/phase1-shell-light.png` (`phase1-shell`). Light palette is an untuned first pass (Phase 6). |
 | A5 | Graph matches mockup; WebGPU 4K; gravity+collision+free clusters; click/zoom/drag/pan; WebGPU↔2D fallback | 🟡 | Canvas-2D living graph (mockup physics, token-driven), now fed by REAL indexer data when a vault is open (`get_graph_payload` → `payloadToGraphData`, `phase2-ipc`); mock otherwise. Remaining: WebGPU/4K, all mouse interaction, fallback verify (`phase4-webgpu`). |
@@ -20,6 +20,11 @@ States: ✅ proven · 🟡 partial · 🟥 stubbed · ⬜ untouched
 | A9 | External MCP client can `search` + `get_semantic_clusters` | ⬜ | `phase10-mcp`. |
 | A10 | Reskin (edit `tokens.css`) re-themes app **and** graph, no component edits | ✅ | The `[data-theme=light]` block in `tokens.css` re-themes the whole app + the canvas graph (via `resolveGraphTheme()`) with zero component edits: compare `docs/proof/phase1-shell-{dark,light}.png` (`phase1-shell`). Formal third-theme experiment still open. |
 | A11 | Taste pass confirms hand-built, not templated | ⬜ | `phase6-glass` / final gate. |
+
+## Phase 5 shipped (Search + ⌘K command palette)
+- ⌘K command palette ported from the mockup (`.cmd-palette` glass over a dimmed overlay): debounced FTS `search` IPC, result rows, ↑↓ wrap-nav + Enter-to-open + Esc-to-close + click-to-open, focused-result rose wash.
+- Opens via ⌘K/Ctrl+K (global keydown) and the titlebar "⌘K Search" button; selecting a result opens the note (reuses `openNote`).
+- Stale-response guard on the debounced search; `clampIndex` unit-tested; full open→type→Esc Playwright E2E. No Rust changes (reuses Phase 2's `search`).
 
 ## Phase 3 shipped (CodeMirror 6 editor)
 - CM6 editor host (StrictMode-safe single mount — Playwright `cmCount===1`) replaces the static body; React keeps the breadcrumb/title/meta/backlinks chrome.

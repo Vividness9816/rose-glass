@@ -12,7 +12,7 @@ with a riskiest-premise spike on a tiny scope before its build.
 | 2 | `phase2-indexer` | Vault open + watcher + indexer + SQLite schema (§8); incremental + full-rebuild | ✅ done (A3 proven; review pass pending) |
 | 3 | `phase3-editor` | CodeMirror 6 editor pane (mockup parity), save path, live links/backlinks | ✅ done (reviewed) |
 | 4 | `phase4-webgpu` | WebGPU renderer at fixed 4K + drag node/cluster + zoom/pan + click-open; **spike: React19×design-libs + WebGPU 4K probe + fallback** | ⬜ |
-| 5 | `phase5-search` | FTS5 search + ⌘K command palette (mockup glass) | ⬜ |
+| 5 | `phase5-search` | FTS5 search + ⌘K command palette (mockup glass) | ✅ done |
 | 6 | `phase6-glass` | Theme-aware shadergradient backdrop + dashersw glass + backdrop-filter surfaces; light-theme tuning + dual-theme diffs | ⬜ |
 | 7 | `phase7-terminal` | xterm.js + portable-pty; "Run Claude Code here" | ⬜ |
 | 8 | `phase8-activity` | CC activity bus → node light-up + Activity pane. **GATED: hook-install + transcript-tail safety carve-out (ADR)** | ⬜ |
