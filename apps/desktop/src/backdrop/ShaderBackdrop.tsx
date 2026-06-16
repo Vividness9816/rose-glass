@@ -90,7 +90,7 @@ export default function ShaderBackdrop({ theme }: { theme: Theme }) {
       gl={{ antialias: false, powerPreference: 'low-power' }}
       dpr={[1, 1.5]}
       frameloop="always"
-      style={{ position: 'fixed', inset: 0, zIndex: 0, opacity: 0.6, pointerEvents: 'none' }}
+      style={{ position: 'fixed', inset: 0, zIndex: 0, opacity: 0.8, pointerEvents: 'none' }}
     >
       <GradientMesh theme={theme} />
     </Canvas>

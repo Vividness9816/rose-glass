@@ -40,6 +40,9 @@ importers:
       '@tauri-apps/plugin-opener':
         specifier: ^2
         version: 2.5.4
+      liquid-glass-js:
+        specifier: ^0.1.0
+        version: 0.1.0
       react:
         specifier: ^19.1.0
         version: 19.2.7
@@ -854,6 +857,9 @@ packages:
     resolution: {integrity: sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==}
     engines: {node: '>=6'}
     hasBin: true
+
+  liquid-glass-js@0.1.0:
+    resolution: {integrity: sha512-7+PdaoEap90QnrqUySFx/iJLVQaidw4u9IExgnBw6mhf7BBmqWfJIeHF9P7zp/MitE6GCHF9MV1A54OsWtTqxg==}
 
   loupe@3.2.1:
     resolution: {integrity: sha512-CdzqowRJCeLU72bHvWqwRBBlLcMEtIvGrlvef74kMnV2AolS9Y8xUv1I0U/MNAWMhBlKIoyuEgoJ0t/bbwHbLQ==}
@@ -1810,6 +1816,8 @@ snapshots:
   jsesc@3.1.0: {}
 
   json5@2.2.3: {}
+
+  liquid-glass-js@0.1.0: {}
 
   loupe@3.2.1: {}
 

@@ -18,6 +18,7 @@ import {
 } from '../editor/logic';
 import { GraphPane } from '../graph/GraphPane';
 import { Backdrop } from '../backdrop/Backdrop';
+import { LiquidGlassLens } from '../backdrop/LiquidGlassLens';
 import { CommandPalette } from '../command/CommandPalette';
 import { Titlebar } from './Titlebar';
 import { IconRail } from './IconRail';
@@ -51,6 +52,7 @@ export function Shell() {
   const [backlinks, setBacklinks] = useState<BacklinkDto[]>([]);
   const [doc, setDoc] = useState('');
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [lensOn, setLensOn] = useState(false); // eamonliu liquid-glass graph lens; off by default
 
   const openNotePathRef = useRef<string | null>(null);
   const isDirtyRef = useRef(false);
@@ -225,11 +227,18 @@ export function Shell() {
   return (
     <>
     <Backdrop theme={theme} />
+    {lensOn && <LiquidGlassLens theme={theme} />}
     <div className="app-shell">
       <Titlebar vault={vault} onSearch={openPalette} />
       <IconRail />
       <div className="main-area">
-        <GraphPane theme={theme} data={graphData} onOpenVault={openVaultFlow} />
+        <GraphPane
+          theme={theme}
+          data={graphData}
+          onOpenVault={openVaultFlow}
+          lensOn={lensOn}
+          onToggleLens={() => setLensOn((v) => !v)}
+        />
         <EditorPane
           note={note}
           doc={doc}

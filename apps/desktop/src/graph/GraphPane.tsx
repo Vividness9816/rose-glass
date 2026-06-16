@@ -12,10 +12,14 @@ export function GraphPane({
   theme,
   data,
   onOpenVault,
+  lensOn,
+  onToggleLens,
 }: {
   theme: Theme;
   data?: GraphData;
   onOpenVault?: () => void;
+  lensOn?: boolean;
+  onToggleLens?: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<GraphRenderer | null>(null);
@@ -73,6 +77,17 @@ export function GraphPane({
           <button className="gc-btn active" type="button">All</button>
           <button className="gc-btn" type="button">Focus</button>
           <button className="gc-btn" type="button">Clusters</button>
+          {onToggleLens && (
+            <button
+              className={`gc-btn${lensOn ? ' active' : ''}`}
+              type="button"
+              onClick={onToggleLens}
+              aria-pressed={lensOn}
+              title="Drag a liquid-glass lens over the graph"
+            >
+              ◎ Lens
+            </button>
+          )}
         </div>
       </div>
       <canvas ref={canvasRef} className="graph-canvas" />

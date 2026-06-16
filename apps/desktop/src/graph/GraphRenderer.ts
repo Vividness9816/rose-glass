@@ -10,7 +10,7 @@ import { type GraphTheme, rgba } from './themeColors';
 
 /** Graph-field opacity over the §21 living backdrop. 1 = opaque (backdrop hidden),
     lower = more motion bleeds through. The user's visibility dial for Phase 6. */
-const GRAPH_BG_ALPHA = 0.55;
+const GRAPH_BG_ALPHA = 0.4;
 
 interface Particle {
   e: GraphEdge;
