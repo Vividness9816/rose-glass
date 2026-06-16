@@ -8,27 +8,32 @@ interface Props {
   onOpenNote: (path: string) => void;
 }
 
-/** ⌘K command palette — debounced FTS search over the vault; ↑↓ to move, Enter to
- *  open, Esc to close. Renders the mockup's glass palette. */
+const stripHighlight = (s: string) => s.replace(/<\/?b>/g, '');
+
+/** ⌘K command palette — debounced FTS search; ↑↓ to move, Enter to open, Esc to
+ *  close. Renders the mockup's glass palette. */
 export function CommandPalette({ onClose, onOpenNote }: Props) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchHit[]>([]);
   const [focus, setFocus] = useState(0);
+  const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  // debounced search; ignore stale responses
+  // debounced search; the `active` flag drops stale responses
   useEffect(() => {
     const q = query.trim();
     if (!q) {
       setResults([]);
       setFocus(0);
+      setLoading(false);
       return;
     }
     let active = true;
+    setLoading(true);
     const t = setTimeout(async () => {
       try {
         const hits = await search(q);
@@ -38,6 +43,8 @@ export function CommandPalette({ onClose, onOpenNote }: Props) {
         }
       } catch {
         if (active) setResults([]); // no vault / not under Tauri
+      } finally {
+        if (active) setLoading(false);
       }
     }, 120);
     return () => {
@@ -53,7 +60,12 @@ export function CommandPalette({ onClose, onOpenNote }: Props) {
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
+    // own the hotkey so it doesn't bubble to the global handler and re-toggle
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+    } else if (e.key === 'Escape') {
       onClose();
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -67,13 +79,14 @@ export function CommandPalette({ onClose, onOpenNote }: Props) {
     }
   };
 
-  const showEmpty = query.trim().length > 0 && results.length === 0;
+  const trimmed = query.trim();
 
   return (
     <div className="cmd-overlay" onMouseDown={onClose}>
       <div
         className="cmd-palette"
         role="dialog"
+        aria-modal="true"
         aria-label="Command palette"
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={onKeyDown}
@@ -91,10 +104,12 @@ export function CommandPalette({ onClose, onOpenNote }: Props) {
         </div>
 
         {results.length > 0 && (
-          <div className="cmd-results">
+          <div className="cmd-results" role="listbox">
             {results.map((hit, i) => (
               <div
                 key={hit.path}
+                role="option"
+                aria-selected={i === focus}
                 className={`cmd-result${i === focus ? ' focused' : ''}`}
                 onMouseEnter={() => setFocus(i)}
                 onMouseDown={(e) => {
@@ -105,7 +120,9 @@ export function CommandPalette({ onClose, onOpenNote }: Props) {
                 <div className="cmd-result-icon">📄</div>
                 <div>
                   <div className="cmd-result-title">{hit.title}</div>
-                  <div className="cmd-result-sub">{hit.path}</div>
+                  <div className="cmd-result-sub">
+                    {hit.snippet ? stripHighlight(hit.snippet) : hit.path}
+                  </div>
                 </div>
                 {i === focus && (
                   <div className="cmd-result-kbd">
@@ -117,9 +134,9 @@ export function CommandPalette({ onClose, onOpenNote }: Props) {
           </div>
         )}
 
-        {showEmpty && (
+        {trimmed.length > 0 && results.length === 0 && (
           <div className="cmd-results">
-            <div className="cmd-empty">No results</div>
+            <div className="cmd-empty">{loading ? 'Searching…' : 'No results'}</div>
           </div>
         )}
       </div>

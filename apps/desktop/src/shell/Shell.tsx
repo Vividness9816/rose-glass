@@ -55,6 +55,16 @@ export function Shell() {
   const isDirtyRef = useRef(false);
   const lastSavedRef = useRef<string | null>(null); // disk form (original EOL)
   const eolRef = useRef<Eol>('\n');
+  const prevFocusRef = useRef<HTMLElement | null>(null);
+
+  const openPalette = useCallback(() => {
+    prevFocusRef.current = document.activeElement as HTMLElement | null;
+    setPaletteOpen(true);
+  }, []);
+  const closePalette = useCallback(() => {
+    setPaletteOpen(false);
+    prevFocusRef.current?.focus?.(); // restore focus so keyboard nav isn't lost
+  }, []);
 
   const saver = useMemo(
     () =>
@@ -76,17 +86,18 @@ export function Shell() {
 
   const onToggleTheme = () => setThemeState(toggleTheme(theme));
 
-  // ⌘K / Ctrl+K toggles the command palette
+  // ⌘K / Ctrl+K opens the palette; the palette owns its own close (so pressing
+  // ⌘K inside it can't bubble here and re-toggle).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
-        setPaletteOpen((o) => !o);
+        openPalette();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [openPalette]);
 
   const refreshGraph = useCallback(async (): Promise<GraphPayload | null> => {
     try {
@@ -212,7 +223,7 @@ export function Shell() {
 
   return (
     <div className="app-shell">
-      <Titlebar vault={vault} onSearch={() => setPaletteOpen(true)} />
+      <Titlebar vault={vault} onSearch={openPalette} />
       <IconRail />
       <div className="main-area">
         <GraphPane theme={theme} data={graphData} onOpenVault={openVaultFlow} />
@@ -232,9 +243,7 @@ export function Shell() {
         theme={theme}
         onToggleTheme={onToggleTheme}
       />
-      {paletteOpen && (
-        <CommandPalette onClose={() => setPaletteOpen(false)} onOpenNote={openNote} />
-      )}
+      {paletteOpen && <CommandPalette onClose={closePalette} onOpenNote={openNote} />}
     </div>
   );
 }

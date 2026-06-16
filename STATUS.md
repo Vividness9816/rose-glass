@@ -25,6 +25,7 @@ States: ✅ proven · 🟡 partial · 🟥 stubbed · ⬜ untouched
 - ⌘K command palette ported from the mockup (`.cmd-palette` glass over a dimmed overlay): debounced FTS `search` IPC, result rows, ↑↓ wrap-nav + Enter-to-open + Esc-to-close + click-to-open, focused-result rose wash.
 - Opens via ⌘K/Ctrl+K (global keydown) and the titlebar "⌘K Search" button; selecting a result opens the note (reuses `openNote`).
 - Stale-response guard on the debounced search; `clampIndex` unit-tested; full open→type→Esc Playwright E2E. No Rust changes (reuses Phase 2's `search`).
+- **Review applied:** ⌘K now open-only at the window level (palette owns its close, so ⌘K-inside no longer toggle-conflicts — E2E re-verified); focus restored to the prior element on close; "Searching…" vs "No results" distinction; `aria-modal`/`role=listbox`/`option`+`aria-selected`; results show the FTS snippet (highlight tags stripped — no XSS). Deferred: full Tab focus-trap.
 
 ## Phase 3 shipped (CodeMirror 6 editor)
 - CM6 editor host (StrictMode-safe single mount — Playwright `cmCount===1`) replaces the static body; React keeps the breadcrumb/title/meta/backlinks chrome.
