@@ -1,0 +1,52 @@
+/* Resolves graph colors from the token layer at runtime, so the canvas
+   renders with var(--cluster-N)/var(--graph-*) and NEVER a hex literal.
+   This is the de-hardcode fix the council required: re-theming the app
+   re-themes the graph with zero renderer edits.
+
+   getComputedStyle does not substitute var() chains for custom properties,
+   so we resolve through a hidden probe element's `color` (always rgb()). */
+
+export type RGB = [number, number, number];
+
+export interface GraphTheme {
+  bg: string;
+  nodeCore: string;
+  clusters: { accent: string; rgb: RGB }[];
+  crossEdge: RGB;
+  label: RGB;
+}
+
+let probe: HTMLDivElement | null = null;
+
+function resolve(expr: string): RGB {
+  if (!probe) {
+    probe = document.createElement('div');
+    probe.style.cssText = 'position:absolute;opacity:0;pointer-events:none;width:0;height:0';
+    document.body.appendChild(probe);
+  }
+  probe.style.color = '';
+  probe.style.color = expr;
+  const m = getComputedStyle(probe).color.match(/[\d.]+/g);
+  if (!m || m.length < 3) return [255, 255, 255];
+  return [Number(m[0]), Number(m[1]), Number(m[2])];
+}
+
+export function rgba(c: RGB, a: number): string {
+  return `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+}
+
+export function resolveGraphTheme(): GraphTheme {
+  const clusters = [0, 1, 2, 3].map((i) => {
+    const rgb = resolve(`var(--cluster-${i})`);
+    return { accent: `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`, rgb };
+  });
+  const bg = resolve('var(--graph-bg)');
+  const core = resolve('var(--graph-node-core)');
+  return {
+    bg: `rgb(${bg[0]},${bg[1]},${bg[2]})`,
+    nodeCore: `rgb(${core[0]},${core[1]},${core[2]})`,
+    clusters,
+    crossEdge: resolve('var(--graph-cross-edge)'),
+    label: resolve('var(--text-1)'),
+  };
+}

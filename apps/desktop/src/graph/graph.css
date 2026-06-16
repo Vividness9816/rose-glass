@@ -1,0 +1,88 @@
+/* Graph pane chrome — ported from mockup .graph-pane / .graph-header (lines 207-257). */
+
+.graph-pane {
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+
+.graph-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  gap: 8px;
+  z-index: 2;
+}
+
+.graph-glyph {
+  font-size: 13px;
+  color: var(--rose);
+  opacity: 0.7;
+}
+
+.graph-title {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+  letter-spacing: 0.02em;
+}
+
+.graph-controls {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+.gc-btn {
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  background: transparent;
+  border: 1px solid var(--border-mid);
+  color: var(--text-3);
+  cursor: default;
+  transition: all var(--dur-fast) var(--ease);
+}
+.gc-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text-2);
+}
+.gc-btn.active {
+  border-color: var(--rose);
+  color: var(--rose-bright);
+  background: var(--rose-glow-sm);
+}
+
+.graph-canvas {
+  position: absolute;
+  top: 36px;
+  left: 0;
+  width: 100%;
+  height: calc(100% - 36px);
+  display: block;
+}
+
+/* bottom-fade gradient (mockup .graph-pane::after) */
+.graph-fade {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  background: linear-gradient(to top, var(--bg), transparent);
+  pointer-events: none;
+  z-index: 1;
+}
