@@ -64,7 +64,8 @@
   gap: 5px;
   transition: all var(--dur-fast) var(--ease);
 }
-.tb-btn:hover { background: var(--surface-3); color: var(--text-1); }
+.tb-btn:hover:not(:disabled) { background: var(--surface-3); color: var(--text-1); }
+.tb-btn:disabled { opacity: 0.4; cursor: default; }
 .tb-btn.primary { background: var(--rose); border-color: var(--rose-bright); color: var(--text-on-rose); }
 
 /* ── Icon rail ── */

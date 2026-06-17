@@ -38,6 +38,7 @@ pub fn run() {
             commands::get_graph_payload,
             commands::read_note_file,
             commands::save_note_file,
+            commands::read_file_bytes,
             commands::resolve_link,
             commands::recompute_clusters,
             commands::activity_start,

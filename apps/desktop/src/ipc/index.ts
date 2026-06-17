@@ -70,6 +70,14 @@ export const saveNoteFile = (path: string, content: string) =>
 export const resolveLink = (target: string, srcPath: string) =>
   invoke<string | null>('resolve_link', { target, srcPath });
 
+/** Phase 9: read a vault file as raw bytes (PDF/docx view). The Rust command returns a
+ *  `tauri::ipc::Response`, so `invoke` resolves to an ArrayBuffer (efficient — not a
+ *  number[]). Same vault-root guard as the text path: binaries must be inside the vault. */
+export const readFileBytes = async (path: string): Promise<Uint8Array> => {
+  const buf = await invoke<ArrayBuffer>('read_file_bytes', { path });
+  return new Uint8Array(buf);
+};
+
 export const onIndexNote = (
   cb: (e: { path: string; op: 'upsert' | 'delete' }) => void,
 ): Promise<UnlistenFn> =>

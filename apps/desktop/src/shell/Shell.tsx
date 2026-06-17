@@ -16,6 +16,8 @@ import {
   shouldReloadDoc,
   toLf,
 } from '../editor/logic';
+import { editorKind } from '../editor/editorKind';
+import { siblingMdPath, toVaultRelative } from '../editor/fileOpen';
 import { GraphPane } from '../graph/GraphPane';
 import { Backdrop } from '../backdrop/Backdrop';
 import { LiquidGlassLens } from '../backdrop/LiquidGlassLens';
@@ -66,6 +68,7 @@ export function Shell() {
   const [note, setNote] = useState<NoteDto | null>(null);
   const [backlinks, setBacklinks] = useState<BacklinkDto[]>([]);
   const [doc, setDoc] = useState('');
+  const [binaryPath, setBinaryPath] = useState<string | null>(null); // Phase 9: open pdf/docx (not an indexed note)
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [lensOn, setLensOn] = useState(false); // eamonliu liquid-glass graph lens; off by default
   const [terminalOpen, setTerminalOpen] = useState(false); // Ctrl+` toggles the terminal drawer
@@ -82,6 +85,7 @@ export function Shell() {
   const activityGenRef = useRef(0);
 
   const openNotePathRef = useRef<string | null>(null);
+  const vaultRootRef = useRef<string | null>(null); // absolute vault root, for relativizing Open-file picks
   const isDirtyRef = useRef(false);
   const lastSavedRef = useRef<string | null>(null); // disk form (original EOL)
   const eolRef = useRef<Eol>('\n');
@@ -164,6 +168,7 @@ export function Shell() {
         saver.flush(); // persist any pending edit to the previous note first
         const raw = await readNoteFile(path); // disk bytes (strict UTF-8), original EOL
         const [n, bl] = await Promise.all([getNote(path), getBacklinks(path)]);
+        setBinaryPath(null); // opening a note leaves any pdf/docx view
         openNotePathRef.current = path;
         eolRef.current = detectEol(raw);
         isDirtyRef.current = false;
@@ -176,6 +181,76 @@ export function Shell() {
       }
     },
     [saver],
+  );
+
+  // Phase 9: open a non-markdown binary (pdf/docx). It is NOT an indexed note, so there
+  // is no autosave target — clear the note buffer and show the view engine.
+  const openBinary = useCallback(
+    (rel: string) => {
+      saver.flush(); // persist any pending edit to the previous note first
+      openNotePathRef.current = null;
+      isDirtyRef.current = false;
+      lastSavedRef.current = null;
+      setNote(null);
+      setBacklinks([]);
+      setDoc('');
+      setBinaryPath(rel);
+      setRailView('graph'); // surface the editor pane (not the activity pane)
+    },
+    [saver],
+  );
+
+  // Phase 9: "Open file…" — pick any file via the dialog and route by extension. The file
+  // must live inside the open vault (the IPC + safe_join contract is vault-relative); a
+  // markdown/txt pick opens as a note, a pdf/docx as a binary view.
+  const onOpenFile = useCallback(async () => {
+    if (!inTauri()) return;
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const sel = await open({
+        multiple: false,
+        defaultPath: vaultRootRef.current ?? undefined,
+        filters: [{ name: 'Documents', extensions: ['pdf', 'docx', 'md', 'markdown', 'txt'] }],
+      });
+      if (typeof sel !== 'string') return;
+      const root = vaultRootRef.current;
+      const rel = root ? toVaultRelative(sel, root) : null;
+      if (!rel) {
+        console.error('file must be inside the open vault:', sel); // ponytail: surface in-UI later
+        return;
+      }
+      const kind = editorKind(rel);
+      if (kind === 'pdf' || kind === 'docx') openBinary(rel);
+      else await openNote(rel);
+    } catch (e) {
+      console.error('open file failed:', e);
+    }
+  }, [openBinary, openNote]);
+
+  // Phase 9 / docx B1: extract the .docx to a sibling markdown file and open it. The .docx
+  // is never mutated; the sibling .md flows through the normal save + indexer path.
+  const onEditAsMarkdown = useCallback(
+    async (docxPath: string, markdown: string) => {
+      const sibling = siblingMdPath(docxPath);
+      try {
+        // NEVER clobber an existing sibling: once extracted, report.docx.md is a real,
+        // hand-editable note. Re-extracting would silently destroy the user's edits
+        // (the lossless-writes invariant covers the sibling .md too). So if it already
+        // exists on disk, just open it; only the FIRST extraction writes.
+        let exists = false;
+        try {
+          await readNoteFile(sibling);
+          exists = true;
+        } catch {
+          exists = false; // not found (or unreadable) → safe to create
+        }
+        if (!exists) await saveNoteFile(sibling, markdown);
+        await openNote(sibling); // watcher indexes a new .md → it appears as a graph node
+      } catch (e) {
+        console.error('edit-as-markdown failed:', e);
+      }
+    },
+    [openNote],
   );
 
   const onChangeDoc = useCallback(
@@ -207,6 +282,7 @@ export function Shell() {
       const dir = await open({ directory: true, multiple: false });
       if (typeof dir !== 'string') return;
       const res = await openVault(dir);
+      vaultRootRef.current = res.vault; // absolute root, for the Open-file relativizer
       const name = res.vault.replace(/\\/g, '/').split('/').filter(Boolean).pop();
       setVault(name ?? res.vault);
       const payload = await refreshGraph();
@@ -311,7 +387,12 @@ export function Shell() {
     <Backdrop theme={theme} />
     {lensOn && <LiquidGlassLens theme={theme} />}
     <div className="app-shell">
-      <Titlebar vault={vault} onSearch={openPalette} />
+      <Titlebar
+        vault={vault}
+        onSearch={openPalette}
+        onOpenFile={() => void onOpenFile()}
+        canOpenFile={graphData !== undefined}
+      />
       <IconRail active={railView} onSelect={setRailView} />
       <div className="main-area">
         <GraphPane
@@ -335,9 +416,11 @@ export function Shell() {
             note={note}
             doc={doc}
             backlinks={backlinks}
+            binaryPath={binaryPath}
             onChangeDoc={onChangeDoc}
             onOpenPath={openNote}
             onWikiClick={onWikiClick}
+            onEditAsMarkdown={onEditAsMarkdown}
           />
         )}
       </div>

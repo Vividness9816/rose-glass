@@ -13,7 +13,17 @@ async function windowAction(action: 'close' | 'minimize' | 'toggleMaximize') {
   }
 }
 
-export function Titlebar({ vault, onSearch }: { vault: string; onSearch?: () => void }) {
+export function Titlebar({
+  vault,
+  onSearch,
+  onOpenFile,
+  canOpenFile = true,
+}: {
+  vault: string;
+  onSearch?: () => void;
+  onOpenFile?: () => void;
+  canOpenFile?: boolean;
+}) {
   return (
     <div className="titlebar" data-tauri-drag-region>
       <div className="traffic-lights">
@@ -39,7 +49,15 @@ export function Titlebar({ vault, onSearch }: { vault: string; onSearch?: () => 
       <div className="title-center">{vault} — Rose Glass</div>
       <div className="titlebar-right">
         <button className="tb-btn" type="button" onClick={onSearch}>⌘K Search</button>
-        <button className="tb-btn" type="button">↗ Share</button>
+        <button
+          className="tb-btn"
+          type="button"
+          onClick={onOpenFile}
+          disabled={!canOpenFile}
+          title={canOpenFile ? 'Open a PDF / Word doc / note from the vault' : 'Open a vault first'}
+        >
+          ⎘ Open file
+        </button>
         <button className="tb-btn primary" type="button">+ New note</button>
       </div>
     </div>

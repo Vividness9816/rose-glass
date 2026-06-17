@@ -1,17 +1,29 @@
-/* Editor pane — mockup chrome (breadcrumb / title / meta / backlinks) as React,
-   with a live CodeMirror 6 host in place of the static body. */
+/* Editor pane — mockup chrome (breadcrumb / title / meta / backlinks) as React.
+   Markdown notes get a live CodeMirror 6 host. Non-markdown binaries (PDF/docx) are
+   not indexed notes — they arrive via `binaryPath` and render their view engine
+   (PdfView / DocxView). The .docx "Edit as Markdown" action surfaces through
+   onEditAsMarkdown (Phase 9 / ADR-20260617). */
 
+import { lazy, Suspense } from 'react';
 import type { BacklinkDto, NoteDto } from '../ipc';
 import { CodeMirrorHost } from '../editor/CodeMirrorHost';
-import { editorKind, formatLabel } from '../editor/editorKind';
+import { editorKind } from '../editor/editorKind';
+
+// Lazy-split the viewers so pdfjs/mammoth/dompurify stay OFF the critical path (the
+// project's three.js/ShaderBackdrop pattern) — loaded only when a binary is opened.
+const PdfView = lazy(() => import('../editor/PdfView').then((m) => ({ default: m.PdfView })));
+const DocxView = lazy(() => import('../editor/DocxView').then((m) => ({ default: m.DocxView })));
 
 interface Props {
   note: NoteDto | null;
   doc: string;
   backlinks: BacklinkDto[];
+  /** When set, a non-markdown binary (pdf/docx) is open instead of a note. */
+  binaryPath: string | null;
   onChangeDoc: (doc: string) => void;
   onOpenPath: (path: string) => void;
   onWikiClick: (target: string) => void;
+  onEditAsMarkdown: (docxPath: string, markdown: string) => void;
 }
 
 function relativeTime(mtimeMs: number): string {
@@ -21,7 +33,63 @@ function relativeTime(mtimeMs: number): string {
   return `${days} days ago`;
 }
 
-export function EditorPane({ note, doc, backlinks, onChangeDoc, onOpenPath, onWikiClick }: Props) {
+function Breadcrumb({ path, current }: { path: string[]; current: string }) {
+  return (
+    <div className="breadcrumb">
+      {path.map((seg, i) => (
+        <span key={i} style={{ display: 'contents' }}>
+          <span className="bc-seg">{seg}</span>
+          <span className="bc-sep">›</span>
+        </span>
+      ))}
+      <span className="bc-current">{current}</span>
+    </div>
+  );
+}
+
+export function EditorPane({
+  note,
+  doc,
+  backlinks,
+  binaryPath,
+  onChangeDoc,
+  onOpenPath,
+  onWikiClick,
+  onEditAsMarkdown,
+}: Props) {
+  // ── Binary (PDF/docx) view — not an indexed note ──
+  if (binaryPath) {
+    const kind = editorKind(binaryPath);
+    return (
+      <div className="editor-pane">
+        <div className="editor-header">
+          <Breadcrumb
+            path={binaryPath.split('/').slice(0, -1)}
+            current={binaryPath.split('/').pop() ?? binaryPath}
+          />
+        </div>
+        <div className="editor-body">
+          {/* key={binaryPath}: remount on a path switch so a viewer's async load/teardown
+              never races against a stale prior instance (fresh refs + lifecycle per file). */}
+          <Suspense fallback={<div className="bv-status">Loading viewer…</div>}>
+            {kind === 'pdf' ? (
+              <PdfView key={binaryPath} path={binaryPath} />
+            ) : kind === 'docx' ? (
+              <DocxView key={binaryPath} path={binaryPath} onEditAsMarkdown={onEditAsMarkdown} />
+            ) : (
+              <div className="format-placeholder">
+                <div className="fp-icon">◫</div>
+                <div className="fp-title">Unsupported file</div>
+                <div className="fp-note">{binaryPath.split('/').pop()} can&apos;t be opened in-app.</div>
+              </div>
+            )}
+          </Suspense>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Markdown note view ──
   const segments = note ? note.path.split('/').slice(0, -1) : [];
   const fm = (note?.frontmatter ?? null) as Record<string, unknown> | null;
   const dateStr =
@@ -34,15 +102,7 @@ export function EditorPane({ note, doc, backlinks, onChangeDoc, onOpenPath, onWi
   return (
     <div className="editor-pane">
       <div className="editor-header">
-        <div className="breadcrumb">
-          {segments.map((seg, i) => (
-            <span key={i} style={{ display: 'contents' }}>
-              <span className="bc-seg">{seg}</span>
-              <span className="bc-sep">›</span>
-            </span>
-          ))}
-          <span className="bc-current">{note?.title ?? 'No note open'}</span>
-        </div>
+        <Breadcrumb path={segments} current={note?.title ?? 'No note open'} />
         <div className="editor-actions">
           <button className="ea-btn" title="Outline" type="button">≡</button>
           <button className="ea-btn" title="Properties" type="button">◈</button>
@@ -61,25 +121,13 @@ export function EditorPane({ note, doc, backlinks, onChangeDoc, onOpenPath, onWi
           </div>
         )}
 
-        {note && editorKind(note.path) !== 'markdown' ? (
-          <div className="format-placeholder">
-            <div className="fp-icon">◫</div>
-            <div className="fp-title">{formatLabel(editorKind(note.path))} — in-app editing coming</div>
-            <div className="fp-note">
-              {note.path.split('/').pop()} opens here once the format-engine increment
-              lands (PDF.js/MuPDF for PDF, TipTap + docx bridge for Word). Markdown and
-              text edit live today.
-            </div>
-          </div>
-        ) : (
-          <CodeMirrorHost
-            className="note-body cm-host"
-            doc={doc}
-            notePath={note?.path ?? null}
-            onChangeDoc={onChangeDoc}
-            onWikiClick={onWikiClick}
-          />
-        )}
+        <CodeMirrorHost
+          className="note-body cm-host"
+          doc={doc}
+          notePath={note?.path ?? null}
+          onChangeDoc={onChangeDoc}
+          onWikiClick={onWikiClick}
+        />
 
         {backlinks.length > 0 && (
           <div className="backlinks">

@@ -165,6 +165,50 @@ pub async fn save_note_file(
     Ok(())
 }
 
+/// Phase 9: read a vault file as raw bytes (PDF/docx view). Goes through the same
+/// `safe_join` vault-root guard as the text path, so a binary must live INSIDE the
+/// vault (no absolute / `..` reads). Returns raw bytes via `tauri::ipc::Response`
+/// (an efficient ArrayBuffer transfer, NOT a bloated JSON `number[]`). Touches only
+/// the briefly-held `vault_root` lock — never the DB `Mutex` — so it can't stall IPC.
+/// ponytail: 100 MB cap guards against OOM on a pathological file; raise the const if a
+/// real document needs more.
+#[tauri::command]
+pub async fn read_file_bytes(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<tauri::ipc::Response, IpcError> {
+    const MAX_BYTES: u64 = 100 * 1024 * 1024;
+    let root = lock(&state.vault_root)
+        .clone()
+        .ok_or_else(|| IpcError("no vault open".into()))?;
+    let abs = crate::fs_safe::safe_join(&root, &path)?;
+    let meta = std::fs::metadata(&abs)?;
+    if !meta.is_file() {
+        return Err(IpcError("target is not a regular file".into()));
+    }
+    if meta.len() > MAX_BYTES {
+        return Err(IpcError(format!(
+            "file too large to open ({} MB; cap {} MB)",
+            meta.len() / (1024 * 1024),
+            MAX_BYTES / (1024 * 1024)
+        )));
+    }
+    // Bounded read from one fd: TOCTOU-safe — a file that grows after the stat still can't
+    // be read past the cap, and a non-regular entry can't stream unbounded bytes.
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(&abs)?
+        .take(MAX_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_BYTES {
+        return Err(IpcError(format!(
+            "file too large to open (cap {} MB)",
+            MAX_BYTES / (1024 * 1024)
+        )));
+    }
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 #[tauri::command]
 pub async fn resolve_link(
     state: State<'_, AppState>,
