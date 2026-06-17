@@ -20,11 +20,11 @@ export function getStoredTheme(): Theme {
   }
 }
 
-export function applyTheme(theme: Theme): void {
+function applyTheme(theme: Theme): void {
   document.documentElement.setAttribute('data-theme', theme);
 }
 
-export function setTheme(theme: Theme): void {
+function setTheme(theme: Theme): void {
   applyTheme(theme);
   try {
     localStorage.setItem(STORAGE_KEY, theme);
