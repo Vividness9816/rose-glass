@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
+# Two binaries exist (the app + the rose-glass-mcp sidecar); `cargo run` / `tauri dev`
+# default to the app. Run the sidecar with `cargo run --bin rose-glass-mcp`.
+default-run = "desktop"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
