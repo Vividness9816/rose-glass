@@ -30,20 +30,23 @@ export class GraphRenderer {
   private data: GraphData;
   private theme: GraphTheme;
   private particles: Particle[] = [];
-  private W = 0;
+  private W = 0; // logical (CSS) px — the backing store is W*dpr × H*dpr physical px
   private H = 0;
+  private dpr = 1;
   private tick = 0;
   private raf = 0;
   private running = false;
 
-  constructor(canvas: HTMLCanvasElement, data: GraphData, theme: GraphTheme) {
+  constructor(canvas: HTMLCanvasElement, data: GraphData, theme: GraphTheme, dpr = 1) {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('2D context unavailable');
     this.ctx = ctx;
     this.data = data;
     this.theme = theme;
-    this.W = canvas.width;
-    this.H = canvas.height;
+    this.dpr = dpr;
+    // GraphPane sizes the backing store to physical px (w*dpr); work in logical px.
+    this.W = canvas.width / dpr;
+    this.H = canvas.height / dpr;
     this.data.edges.forEach((e) => {
       for (let i = 0; i < 2; i++) this.spawnParticle(e);
     });
@@ -53,7 +56,8 @@ export class GraphRenderer {
     this.theme = theme;
   }
 
-  setSize(w: number, h: number) {
+  setSize(w: number, h: number, dpr = this.dpr) {
+    this.dpr = dpr;
     this.W = w;
     this.H = h;
   }
@@ -132,6 +136,9 @@ export class GraphRenderer {
     const { nodes, edges } = this.data;
     const clusterRgb = (c: number) => theme.clusters[c]?.rgb ?? theme.clusters[0].rgb;
 
+    // Map logical → physical px so all draws (incl. text) render at native resolution
+    // (crisp on HiDPI/4K — fixes the canvas-at-CSS-px fuzziness). Reset+scale each frame.
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     // ponytail: translucent (was opaque theme.bg) so the §21 living backdrop shows
     // through behind the graph — the graph floats in the gradient field. The alpha keeps

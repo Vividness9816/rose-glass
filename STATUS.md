@@ -62,7 +62,7 @@ States: ✅ proven · 🟡 partial · 🟥 stubbed · ⬜ untouched
 
 ## Known ceilings (ponytail-marked)
 - Frameless window: native edge-resize reduced on Windows; upgrade = resize handles / `tauri-plugin-decorum`.
-- Graph canvas at CSS-px resolution (not yet 4K/dpr) — fixed-4K buffer lands with WebGPU (`phase4-webgpu`).
+- ~~Graph canvas at CSS-px resolution~~ → **fixed**: the canvas-2D graph now renders its backing store at `devicePixelRatio` (crisp text/graph on HiDPI/4K — verified at dpr 1.5, `phase4-graph`). The deliberately-oversized *fixed-4K* buffer (zoom headroom) still lands with WebGPU (`phase4-webgpu`).
 - `favicon.ico` 404 in dev console — cosmetic; add a favicon when chrome is finalized.
 
 ### Phase 2 review — deferred (low/speculative or future-phase)

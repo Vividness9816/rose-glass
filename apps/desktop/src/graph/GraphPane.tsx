@@ -29,23 +29,27 @@ export function GraphPane({
     if (!canvas) return;
     let renderer: GraphRenderer | null = null;
 
-    const build = () => {
+    // Backing store at device pixels (crisp text/graph on HiDPI/4K); renderer works in CSS px.
+    const sizeCanvas = () => {
+      const dpr = window.devicePixelRatio || 1;
       const w = Math.max(1, canvas.clientWidth);
       const h = Math.max(1, canvas.clientHeight);
-      canvas.width = w;
-      canvas.height = h;
-      renderer = new GraphRenderer(canvas, data ?? buildMockGraph(w, h), resolveGraphTheme());
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      return { w, h, dpr };
+    };
+
+    const build = () => {
+      const { w, h, dpr } = sizeCanvas();
+      renderer = new GraphRenderer(canvas, data ?? buildMockGraph(w, h), resolveGraphTheme(), dpr);
       rendererRef.current = renderer;
       renderer.start();
     };
 
     const ro = new ResizeObserver(() => {
-      const w = Math.max(1, canvas.clientWidth);
-      const h = Math.max(1, canvas.clientHeight);
-      canvas.width = w;
-      canvas.height = h;
+      const { w, h, dpr } = sizeCanvas();
       if (renderer) {
-        renderer.setSize(w, h);
+        renderer.setSize(w, h, dpr);
       } else {
         build();
       }
