@@ -1,9 +1,12 @@
-import { useEffect, useRef, type MutableRefObject } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import type { Theme } from '../appearance/theme';
 import type { GraphData } from './types';
 import { buildMockGraph } from './mockGraph';
 import { resolveGraphTheme } from './themeColors';
 import { GraphRenderer } from './GraphRenderer';
+import type { GraphRendererLike } from './Renderer';
+import { WebGpuGraphRenderer } from './webgpu/WebGpuGraphRenderer';
+import { probeWebGpu } from './webgpu/probe';
 import './graph.css';
 
 /** Graph pane: mockup chrome + the live canvas-2D graph. Uses `data` (from the
@@ -33,14 +36,36 @@ export function GraphPane({
   onOpenNode?: (path: string) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rendererRef = useRef<GraphRenderer | null>(null);
+  const rendererRef = useRef<GraphRendererLike | null>(null);
   const onOpenNodeRef = useRef(onOpenNode);
   onOpenNodeRef.current = onOpenNode;
+  const [gpuOn, setGpuOn] = useState(false); // user intent: try the WebGPU path
+  const [gpuAvailable, setGpuAvailable] = useState<boolean | null>(null); // null = probing
+  const [gpuReason, setGpuReason] = useState('probing…');
+  // Read availability inside build() via a ref so the probe RESOLVING doesn't re-run
+  // the build effect (which would needlessly tear down + reshuffle the mock layout).
+  const gpuAvailableRef = useRef(gpuAvailable);
+  gpuAvailableRef.current = gpuAvailable;
+
+  // Probe WebGPU once (adapter+device actually obtainable), not just navigator.gpu.
+  useEffect(() => {
+    let cancelled = false;
+    void probeWebGpu().then((c) => {
+      if (cancelled) return;
+      setGpuAvailable(c.ok);
+      setGpuReason(c.reason);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    let renderer: GraphRenderer | null = null;
+    let renderer: GraphRendererLike | null = null;
+    let cancelled = false;
+    let built = false;
     if (pulseRef) pulseRef.current = (rel, action) => rendererRef.current?.pulse(rel, action);
 
     // Backing store at device pixels (crisp text/graph on HiDPI/4K); renderer works in CSS px.
@@ -53,30 +78,58 @@ export function GraphPane({
       return { w, h, dpr };
     };
 
-    const build = () => {
+    const build = async () => {
       const { w, h, dpr } = sizeCanvas();
-      renderer = new GraphRenderer(canvas, data ?? buildMockGraph(w, h), resolveGraphTheme(), dpr);
-      rendererRef.current = renderer;
-      renderer.start();
+      const gd = data ?? buildMockGraph(w, h);
+      const t = resolveGraphTheme();
+      let r: GraphRendererLike | null = null;
+      if (gpuOn && gpuAvailableRef.current) {
+        // External device loss → flip the toggle off; the canvas `key` remounts a
+        // fresh element and the effect re-runs on the canvas-2D path.
+        const onLost = () => {
+          if (!cancelled) setGpuOn(false);
+        };
+        r = await WebGpuGraphRenderer.create(canvas, gd, t, dpr, onLost); // null on any GPU failure
+        if (!r) {
+          // create() may have committed this canvas to 'webgpu' mode, so getContext('2d')
+          // would now throw. DON'T build 2D here — flip gpuOn (remounts a clean canvas via
+          // the JSX key) and let the effect re-run build the 2D path on the fresh element.
+          if (!cancelled) setGpuOn(false);
+          return;
+        }
+      }
+      if (!r) r = new GraphRenderer(canvas, gd, t, dpr);
+      if (cancelled) {
+        r.stop();
+        return;
+      }
+      renderer = r;
+      rendererRef.current = r;
+      const s = sizeCanvas(); // honor any resize that landed during the async build
+      r.setSize(s.w, s.h, s.dpr);
+      r.start();
     };
 
     const ro = new ResizeObserver(() => {
       const { w, h, dpr } = sizeCanvas();
-      if (renderer) {
-        renderer.setSize(w, h, dpr);
-      } else {
-        build();
+      if (renderer) renderer.setSize(w, h, dpr);
+      else if (!built) {
+        built = true;
+        void build().catch(() => {
+          /* any build throw degrades to a no-op (never an unhandled rejection) */
+        });
       }
     });
     ro.observe(canvas);
 
     return () => {
+      cancelled = true;
       ro.disconnect();
       renderer?.stop();
       rendererRef.current = null;
       if (pulseRef) pulseRef.current = null;
     };
-  }, [data, pulseRef]);
+  }, [data, pulseRef, gpuOn]);
 
   useEffect(() => {
     rendererRef.current?.setTheme(resolveGraphTheme());
@@ -158,7 +211,9 @@ export function GraphPane({
       canvas.removeEventListener('pointerup', onUp);
       canvas.removeEventListener('pointercancel', onUp);
     };
-  }, []);
+    // gpuOn re-runs this so listeners re-attach to the fresh canvas after the
+    // backend toggle remounts it (via the JSX key).
+  }, [gpuOn]);
 
   return (
     <div className="graph-pane">
@@ -193,9 +248,25 @@ export function GraphPane({
               ◎ Lens
             </button>
           )}
+          <button
+            className={`gc-btn${gpuOn ? ' active' : ''}`}
+            type="button"
+            onClick={() => setGpuOn((v) => !v)}
+            disabled={!gpuAvailable}
+            aria-pressed={gpuOn}
+            title={
+              gpuAvailable === false
+                ? `WebGPU unavailable — using canvas-2D (${gpuReason})`
+                : 'Toggle the WebGPU renderer (canvas-2D is the fallback)'
+            }
+          >
+            {gpuOn ? 'GPU' : '2D'}
+          </button>
         </div>
       </div>
-      <canvas ref={canvasRef} className="graph-canvas" />
+      {/* key by backend: toggling remounts a FRESH canvas so the 2D fallback never
+          inherits a canvas already committed to 'webgpu' (getContext('2d') → null). */}
+      <canvas key={gpuOn ? 'gpu' : '2d'} ref={canvasRef} className="graph-canvas" />
       <div className="graph-fade" />
     </div>
   );

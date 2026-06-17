@@ -10,6 +10,7 @@ import { type GraphTheme, rgba } from './themeColors';
 import { type Camera, IDENTITY_CAMERA, panBy, screenToWorld, zoomAt } from './camera';
 import { nodeAtWorld } from './hitTest';
 import { stepSimulation } from './simulation';
+import type { GraphRendererLike } from './Renderer';
 
 /** Index nodes for activity light-up by path, with a case-folded fallback map: CC
     can report a different in-vault casing than the on-disk index key on a
@@ -54,7 +55,7 @@ function midpoint(na: GraphNode, nb: GraphNode, i: number, j: number) {
   };
 }
 
-export class GraphRenderer {
+export class GraphRenderer implements GraphRendererLike {
   private ctx: CanvasRenderingContext2D;
   private data: GraphData;
   private theme: GraphTheme;
@@ -69,6 +70,8 @@ export class GraphRenderer {
   private pulses = new Map<number, { kind: 'read' | 'modify'; t: number }>();
   // Path → node index for activity light-up (case-folded fallback for Windows).
   private pathIndex: { exact: Map<string, GraphNode>; lower: Map<string, GraphNode> };
+  // id → node, so pulse flares resolve by id (not array position — no id===index assumption).
+  private byId = new Map<number, GraphNode>();
   private camera: Camera = IDENTITY_CAMERA; // Phase 4 pan/zoom
   private draggingId: number | null = null; // pinned node while dragging
 
@@ -80,6 +83,7 @@ export class GraphRenderer {
     this.theme = theme;
     this.dpr = dpr;
     this.pathIndex = indexNodesByPath(this.data.nodes);
+    this.data.nodes.forEach((n) => this.byId.set(n.id, n));
     // GraphPane sizes the backing store to physical px (w*dpr); work in logical px.
     this.W = canvas.width / dpr;
     this.H = canvas.height / dpr;
@@ -379,7 +383,7 @@ export class GraphRenderer {
     // Phase 8 — CC activity flares overlaid on their nodes: read=violet pulse,
     // modify=rose flare (A6), each an expanding ring that fades as `t` decays.
     this.pulses.forEach((p, id) => {
-      const n = nodes[id];
+      const n = this.byId.get(id);
       if (!n) return;
       const col = p.kind === 'read' ? theme.activityRead : theme.activityModify;
       const rad = n.r + 6 + (1 - p.t) * 22;
