@@ -11,7 +11,7 @@ with a riskiest-premise spike on a tiny scope before its build.
 | 4(2D) | `phase4-graph` | Canvas-2D living graph ported, de-hardcoded, on mock data (the §20 2D-fallback leg) | ✅ done (this session) |
 | 2 | `phase2-indexer` | Vault open + watcher + indexer + SQLite schema (§8); incremental + full-rebuild | ✅ done (A3 proven; review pass pending) |
 | 3 | `phase3-editor` | CodeMirror 6 editor pane (mockup parity), save path, live links/backlinks | ✅ done (reviewed) |
-| 4 | `phase4-webgpu` | WebGPU renderer at fixed 4K + drag node/cluster + zoom/pan + click-open; **spike: React19×design-libs + WebGPU 4K probe + fallback** | 🟡 interaction + airtight fallback DONE (3-lens reviewed, vitest 46/46); WebGPU render BUILT but **NOT GPU-VERIFIED** → RTX 5090 eyeball (`phase4-graph`, `phase4-webgpu`) |
+| 4 | `phase4-webgpu` | WebGPU renderer at fixed 4K + drag node/cluster + zoom/pan + click-open; **spike: React19×design-libs + WebGPU 4K probe + fallback** | 🟢 interaction + airtight fallback DONE (3-lens reviewed); **WebGPU render + zoom GPU-VERIFIED on the RTX 5090** (`nvidia/blackwell`, `docs/proof/phase4-webgpu-*.png`). Residual: drag/pan/click feel + literal-4K + GPU-visual parity = optional user confirm (`phase4-graph`, `phase4-webgpu`) |
 | 5 | `phase5-search` | FTS5 search + ⌘K command palette (mockup glass) | ✅ done |
 | 6 | `phase6-glass` | Theme-aware **r3f-v9** living backdrop (shadergradient dead on R19) + **eamonliu** liquid-glass lens (dashersw incompatible w/ WebGL) + backdrop-filter chrome; light-theme **tuned**; dual-theme diffs | ✅ done (visual taste pending user eyeball) |
 | 7 | `phase7-terminal` | xterm.js + portable-pty; embedded shell at cwd=vault (runs Claude Code) | ✅ done (cargo 26/26, user-confirmed live) |

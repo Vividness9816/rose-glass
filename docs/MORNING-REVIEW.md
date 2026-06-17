@@ -34,14 +34,17 @@ cd C:\Users\dnoye\rose-glass\apps\desktop
 pnpm tauri dev      # NOT from C:\Users\dnoye (pnpm junction-dupes → :1420 collisions)
 ```
 
-1. **Phase 4 — WebGPU graph (RTX 5090).** In the graph header click the **GPU** toggle
-   (it's disabled until the WebGPU probe succeeds). Confirm: the graph renders on the
-   GPU at your 4K, and **wheel-zoom / drag-pan / drag-node / click-a-node-opens-it** all
-   feel right. Toggle back to **2D** — it must keep working (the canvas remounts; this
-   was the HIGH review finding). If the GPU render looks wrong, the app still works
-   (it falls back to canvas-2D — a GPU failure can never blank the graph). GPU edges
-   are intentionally leaner than the 2D path (no auras/particles/curves) — tell me if
-   you want full visual parity and I'll grow the shaders.
+1. **Phase 4 — WebGPU graph — ✅ ALREADY GPU-VERIFIED (2026-06-17).** I drove it via
+   headed Edge (= the app's WebView2 engine) against the web build on your RTX 5090:
+   the probe returned adapter **nvidia / blackwell**, the **GPU** toggle built + stayed
+   "GPU" (so the WGSL shaders + pipelines validated on the real GPU — no fallback), the
+   graph rendered (discs + edges, cluster-coloured), and wheel-zoom worked, with zero
+   WebGPU console errors. Proof: `docs/proof/phase4-webgpu-render.png` + `…-zoom.png`
+   (2D baseline `phase4-2d-render.png`), re-runnable via `docs/proof/phase4-webgpu-verify.cjs`.
+   **Optional 30-sec confirm in the app:** click **GPU** in the graph header → drag a
+   node / pan / click-a-node-opens-it feel right, and toggle back to **2D** (must keep
+   working — the canvas remounts). The GPU visual is intentionally leaner than the 2D
+   path (no auras/particles/curves); say the word and I'll grow the shaders to mockup parity.
 
 2. **Phase 8 — Activity mirror (use a SANITIZED / throwaway vault).** Open the **◎
    Activity** item in the left rail. With another Claude Code session running, confirm:
