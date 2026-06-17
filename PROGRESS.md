@@ -18,13 +18,14 @@ Local-first PKM + live Claude Code activity mirror (Tauri 2 + React 19 + TS-stri
 - **Phase 2** — vault indexer + SQLite/FTS5 derived store + `notify` watcher + IPC (open_vault/get_note/get_backlinks/search/get_tags/get_graph_payload/reindex). **A3 delete-DB→rebuild equivalence PROVEN.**
 - **Phase 3** — CodeMirror 6 editor: live wikilink/tag/inline-code decorations, path-safe read/save (atomic + strict-UTF-8 + EOL-preserving), backlinks, open-note + nav, debounced autosave + anti-clobber.
 - **Phase 5** — ⌘K command palette over FTS search (debounced, keyboard nav, focus-restore).
+- **Phase 6** — living rose/violet backdrop (hand-written GLSL on **r3f v9** — `@shadergradient/react` proved dead on React 19, spike-caught) + **eamonliu** liquid-glass lens (toggleable; `dashersw` is html2canvas-incompatible with WebGL) + native `backdrop-filter` chrome + **tuned light theme**. Four §17 WebGL guards (reduced-motion / WebGL2 probe / Suspense / error boundary). **Visual taste pending user eyeball.**
 - Each phase closed with a **3-lens adversarial review** + fixes + regression tests.
 
-**Latest gates (all green):** `cargo test` 24/24 + `clippy` 0 · `tsc` 0 · `vitest` 24/24 · `vite build` 0 · Playwright E2Es (shell render, editor decorations, ⌘K flow). Proof shots in `docs/proof/`.
+**Latest gates (all green):** `cargo test` 24/24 + `clippy` 0 · `tsc` 0 · `vitest` 27/27 · `vite build` 0 (three.js lazy-split) · Playwright E2Es + live WebGL render asserted (0 console errors). Proof shots in `docs/proof/` (incl. `phase6-backdrop-{dark,light}`, `phase6-glass-palette-dark`, `phase6-lens-on`).
 
 ## Next — these need the user in the loop (why the autonomous run paused here)
 - **Phase 4 — WebGPU graph** (4K render + d3-force + drag/zoom/pan/click-open + 2D fallback): the marquee feature; final parity needs a **live-GPU eyeball** on the RTX 5090 (the predecessor's "verified-but-not" trap lives here). Opens with the required spike (React19×design-libs + WebGPU probe + fallback).
-- **Phase 6 — glass / shadergradient backdrop**: visual taste + the Impeccable/Taste design gate.
+- **Phase 6 — DONE** (glass / living backdrop / light-theme tuning), pending only your visual-acceptance eyeball + a formal Impeccable/Taste run (A11). Dials are single named constants: backdrop `opacity` (ShaderBackdrop.tsx, 0.8), `GRAPH_BG_ALPHA` (GraphRenderer.ts, 0.4).
 - **Phase 7 — terminal** (xterm.js + portable-pty) · **Phase 9 — MuPDF/docx editors** · **Phase 10 — MCP sidecar** · **Phase 11 — embeddings/clusters** · **Phase 12 — v1.0 gate**.
 - **Phase 8 — activity bus**: ⚠ **BINDING SAFETY CARVE-OUT (ADR)** — the global CC-hook install (`~/.claude/settings.json`) + `~/.claude/projects/**/*.jsonl` transcript-tail need **explicit user consent** + atomic backup/validate + `127.0.0.1`-only + secret redaction + uninstall. Do not touch settings.json autonomously.
 
