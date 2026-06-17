@@ -323,6 +323,50 @@ pub fn search_fts(conn: &Connection, query: &str) -> rusqlite::Result<Vec<Search
     rows.collect()
 }
 
+#[derive(Serialize)]
+pub struct ClusterMember {
+    pub path: String,
+    pub title: String,
+}
+
+#[derive(Serialize)]
+pub struct ClusterGroup {
+    pub cluster_id: i64,
+    pub members: Vec<ClusterMember>,
+}
+
+/// Semantic clusters grouped by id (the `clusters` table is populated by the
+/// embeddings phase; empty until then). Read surface for the MCP sidecar (§14).
+pub fn get_clusters(conn: &Connection) -> rusqlite::Result<Vec<ClusterGroup>> {
+    // ponytail: LIMIT is a safety cap so a future full-vault clusters table can't blow
+    // up one MCP response (clusters is empty until the embeddings phase). Phase 11 adds
+    // real pagination when there's data to page.
+    let mut stmt = conn.prepare(
+        "SELECT c.cluster_id, n.path, n.title
+         FROM clusters c JOIN notes n ON n.path = c.path
+         ORDER BY c.cluster_id, n.path
+         LIMIT 5000",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+    })?;
+    let mut groups: Vec<ClusterGroup> = Vec::new();
+    for row in rows {
+        let (cid, path, title) = row?;
+        if groups.last().map(|g| g.cluster_id) != Some(cid) {
+            groups.push(ClusterGroup {
+                cluster_id: cid,
+                members: Vec::new(),
+            });
+        }
+        // safe: just pushed if the id changed, so last() exists
+        if let Some(g) = groups.last_mut() {
+            g.members.push(ClusterMember { path, title });
+        }
+    }
+    Ok(groups)
+}
+
 pub fn get_tags(conn: &Connection) -> rusqlite::Result<Vec<TagCount>> {
     let mut stmt = conn.prepare(
         "SELECT tag, COUNT(*) AS c FROM tags GROUP BY tag ORDER BY c DESC, tag",

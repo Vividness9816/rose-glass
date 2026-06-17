@@ -14,6 +14,12 @@ edition = "2021"
 name = "desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# Read-only MCP sidecar (§14): serves `search` + `get_semantic_clusters` over the
+# vault's index.db via JSON-RPC on stdio. Reuses desktop_lib::db (no SQL dup).
+[[bin]]
+name = "rose-glass-mcp"
+path = "src/bin/mcp.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

@@ -1,5 +1,5 @@
 mod commands;
-mod db;
+pub mod db; // exposed for the rose-glass-mcp sidecar bin (read surface — §14)
 mod fs_safe;
 mod indexer;
 mod state;
