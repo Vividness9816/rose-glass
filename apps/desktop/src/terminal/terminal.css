@@ -1,0 +1,80 @@
+/* Terminal drawer — a glass bottom panel over the split, above the statusbar.
+   Token-driven; the glass refracts the living backdrop like the rest of the chrome. */
+.terminal-drawer {
+  position: absolute;
+  left: 52px; /* clear the icon rail */
+  right: 0;
+  bottom: 28px; /* clear the statusbar */
+  height: 300px;
+  display: flex;
+  flex-direction: column;
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  border-top: 1px solid var(--border-mid);
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.4);
+  z-index: 5;
+}
+
+.terminal-header {
+  height: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+.terminal-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--rose);
+  box-shadow: 0 0 6px var(--rose);
+}
+.terminal-title {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-3);
+  letter-spacing: 0.02em;
+}
+.terminal-close {
+  margin-left: auto;
+  height: 20px;
+  width: 20px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 13px;
+  cursor: default;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--dur-fast) var(--ease);
+}
+.terminal-close:hover {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text-1);
+}
+
+.terminal-host {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 4px 6px 10px;
+  overflow: hidden;
+}
+.terminal-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+/* xterm paints its own background; let the glass drawer show by keeping the viewport clear */
+.terminal-host .xterm,
+.terminal-host .xterm-viewport {
+  background-color: transparent !important;
+}

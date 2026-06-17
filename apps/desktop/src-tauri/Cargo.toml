@@ -30,4 +30,5 @@ blake3 = "1"
 serde_yaml_ng = "0.10"
 regex = "1"
 tempfile = "3"
+portable-pty = "0.8"
 

@@ -19,6 +19,7 @@ import {
 import { GraphPane } from '../graph/GraphPane';
 import { Backdrop } from '../backdrop/Backdrop';
 import { LiquidGlassLens } from '../backdrop/LiquidGlassLens';
+import { TerminalPane } from '../terminal/TerminalPane';
 import { CommandPalette } from '../command/CommandPalette';
 import { Titlebar } from './Titlebar';
 import { IconRail } from './IconRail';
@@ -53,6 +54,7 @@ export function Shell() {
   const [doc, setDoc] = useState('');
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [lensOn, setLensOn] = useState(false); // eamonliu liquid-glass graph lens; off by default
+  const [terminalOpen, setTerminalOpen] = useState(false); // Ctrl+` toggles the terminal drawer
 
   const openNotePathRef = useRef<string | null>(null);
   const isDirtyRef = useRef(false);
@@ -96,6 +98,11 @@ export function Shell() {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
         openPalette();
+      }
+      // Ctrl/⌘+` toggles the terminal drawer (VSCode-style).
+      if ((e.ctrlKey || e.metaKey) && e.code === 'Backquote') {
+        e.preventDefault();
+        setTerminalOpen((v) => !v);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -256,6 +263,24 @@ export function Shell() {
         onToggleTheme={onToggleTheme}
       />
       {paletteOpen && <CommandPalette onClose={closePalette} onOpenNote={openNote} />}
+      {terminalOpen && (
+        <div className="terminal-drawer">
+          <div className="terminal-header">
+            <span className="terminal-dot" />
+            <span className="terminal-title">terminal — {vault}</span>
+            <button
+              className="terminal-close"
+              type="button"
+              onClick={() => setTerminalOpen(false)}
+              title="Close terminal (Ctrl+`)"
+              aria-label="Close terminal"
+            >
+              ✕
+            </button>
+          </div>
+          <TerminalPane theme={theme} />
+        </div>
+      )}
     </div>
     </>
   );

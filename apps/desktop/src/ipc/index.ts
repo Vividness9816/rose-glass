@@ -75,6 +75,25 @@ export const onIndexNote = (
 export const onIndexRebuilt = (cb: (e: { note_count: number }) => void): Promise<UnlistenFn> =>
   listen<{ note_count: number }>('index:rebuilt', (e) => cb(e.payload));
 
+// ── Terminal (PTY) — mirrors src-tauri/src/terminal.rs ──
+// Output is raw bytes (Vec<u8> → number[]) so escape sequences / non-ASCII survive
+// chunk boundaries intact; xterm.write() takes a Uint8Array.
+export const ptySpawn = (cwd: string | null, cols: number, rows: number) =>
+  invoke<number>('pty_spawn', { cwd, cols, rows });
+export const ptyWrite = (id: number, data: string) => invoke<void>('pty_write', { id, data });
+export const ptyResize = (id: number, cols: number, rows: number) =>
+  invoke<void>('pty_resize', { id, cols, rows });
+export const ptyKill = (id: number) => invoke<void>('pty_kill', { id });
+
+export const onPtyOutput = (id: number, cb: (data: Uint8Array) => void): Promise<UnlistenFn> =>
+  listen<{ id: number; data: number[] }>('pty:output', (e) => {
+    if (e.payload.id === id) cb(new Uint8Array(e.payload.data));
+  });
+export const onPtyExit = (id: number, cb: () => void): Promise<UnlistenFn> =>
+  listen<{ id: number }>('pty:exit', (e) => {
+    if (e.payload.id === id) cb();
+  });
+
 /** True when running inside the Tauri shell (vs plain Vite / Playwright). */
 export const inTauri = (): boolean =>
   typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
