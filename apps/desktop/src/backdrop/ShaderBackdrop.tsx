@@ -87,6 +87,7 @@ function GradientMesh({ theme }: { theme: Theme }) {
 export default function ShaderBackdrop({ theme }: { theme: Theme }) {
   return (
     <Canvas
+      aria-hidden
       gl={{ antialias: false, powerPreference: 'low-power' }}
       dpr={[1, 1.5]}
       frameloop="always"

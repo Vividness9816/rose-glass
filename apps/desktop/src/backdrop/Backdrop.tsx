@@ -6,14 +6,17 @@
    shader/WebGL init failure catchable by the boundary below (a static import of a
    crashing module is not — that's how @shadergradient/react blanked the app).
 
-   Three fallbacks, so WebGL can never blank the surface (spec §17):
+   Four guards, so WebGL can never blank the surface (spec §17):
      1. prefers-reduced-motion → static, token-driven gradient (no WebGL mounted).
-     2. chunk still loading → static gradient (Suspense fallback).
-     3. any shader/render failure → static gradient (error boundary).
+     2. no WebGL2 (weak GPU / driver loss) → static, synchronously, before lazy-mount
+        (closes the renderer-construction-failure gap the boundary can't — see logic.ts).
+     3. chunk still loading → static gradient (Suspense fallback).
+     4. any shader/render failure → static gradient (error boundary).
    pointer-events: none throughout → never intercepts shell interaction. */
 
 import { Component, lazy, Suspense, type ReactNode, useSyncExternalStore } from 'react';
 import type { Theme } from '../appearance/theme';
+import { hasWebGL2, prefersStaticBackdrop } from './logic';
 import './backdrop.css';
 
 const ShaderBackdrop = lazy(() => import('./ShaderBackdrop'));
@@ -52,7 +55,10 @@ class BackdropBoundary extends Component<{ children: ReactNode }, { failed: bool
 
 export function Backdrop({ theme }: { theme: Theme }) {
   const reduced = useReducedMotion();
-  if (reduced) return <StaticBackdrop />;
+  // §17: static (never the lazy WebGL canvas) when motion is reduced OR no WebGL2.
+  // The WebGL2 probe closes the renderer-construction-failure gap the error boundary
+  // can't (r3f builds the renderer in an uncaught async promise — see logic.ts).
+  if (prefersStaticBackdrop(reduced, hasWebGL2())) return <StaticBackdrop />;
 
   return (
     <BackdropBoundary>
