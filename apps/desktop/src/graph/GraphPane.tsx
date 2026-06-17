@@ -14,12 +14,16 @@ export function GraphPane({
   onOpenVault,
   lensOn,
   onToggleLens,
+  onCluster,
+  clustering,
 }: {
   theme: Theme;
   data?: GraphData;
   onOpenVault?: () => void;
   lensOn?: boolean;
   onToggleLens?: () => void;
+  onCluster?: () => void;
+  clustering?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<GraphRenderer | null>(null);
@@ -80,7 +84,15 @@ export function GraphPane({
           )}
           <button className="gc-btn active" type="button">All</button>
           <button className="gc-btn" type="button">Focus</button>
-          <button className="gc-btn" type="button">Clusters</button>
+          <button
+            className="gc-btn"
+            type="button"
+            onClick={onCluster}
+            disabled={clustering || !onCluster}
+            title="Embed notes (local AI) and group them into semantic clusters"
+          >
+            {clustering ? '…clustering' : 'Clusters'}
+          </button>
           {onToggleLens && (
             <button
               className={`gc-btn${lensOn ? ' active' : ''}`}

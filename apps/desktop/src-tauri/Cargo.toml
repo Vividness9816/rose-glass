@@ -37,4 +37,6 @@ serde_yaml_ng = "0.10"
 regex = "1"
 tempfile = "3"
 portable-pty = "0.8"
+# Local ONNX embeddings (all-MiniLM, offline after a one-time model fetch) — Phase 11.
+fastembed = { version = "5", features = ["hf-hub"] }
 

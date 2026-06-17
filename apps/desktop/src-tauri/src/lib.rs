@@ -1,5 +1,7 @@
+mod cluster;
 mod commands;
 pub mod db; // exposed for the rose-glass-mcp sidecar bin (read surface — §14)
+mod embed;
 mod fs_safe;
 mod indexer;
 mod state;
@@ -35,6 +37,7 @@ pub fn run() {
             commands::read_note_file,
             commands::save_note_file,
             commands::resolve_link,
+            commands::recompute_clusters,
             terminal::pty_spawn,
             terminal::pty_write,
             terminal::pty_resize,

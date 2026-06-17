@@ -34,6 +34,7 @@ import {
   onIndexRebuilt,
   openVault,
   readNoteFile,
+  recomputeClusters,
   resolveLink,
   saveNoteFile,
   type BacklinkDto,
@@ -55,6 +56,7 @@ export function Shell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [lensOn, setLensOn] = useState(false); // eamonliu liquid-glass graph lens; off by default
   const [terminalOpen, setTerminalOpen] = useState(false); // Ctrl+` toggles the terminal drawer
+  const [clustering, setClustering] = useState(false); // Phase 11 embed+cluster in progress
 
   const openNotePathRef = useRef<string | null>(null);
   const isDirtyRef = useRef(false);
@@ -90,6 +92,19 @@ export function Shell() {
   );
 
   const onToggleTheme = () => setThemeState(toggleTheme(theme));
+
+  // Phase 11: embed + cluster all notes; the emitted index:rebuilt refetches + recolours the graph.
+  const onCluster = useCallback(async () => {
+    if (clustering || !inTauri()) return;
+    setClustering(true);
+    try {
+      await recomputeClusters();
+    } catch (e) {
+      console.error('recompute clusters failed:', e);
+    } finally {
+      setClustering(false);
+    }
+  }, [clustering]);
 
   // ⌘K / Ctrl+K opens the palette; the palette owns its own close (so pressing
   // ⌘K inside it can't bubble here and re-toggle).
@@ -245,6 +260,8 @@ export function Shell() {
           onOpenVault={openVaultFlow}
           lensOn={lensOn}
           onToggleLens={() => setLensOn((v) => !v)}
+          onCluster={onCluster}
+          clustering={clustering}
         />
         <EditorPane
           note={note}

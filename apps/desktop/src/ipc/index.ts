@@ -60,6 +60,9 @@ export const search = (query: string) => invoke<SearchHit[]>('search', { query }
 export const getTags = () => invoke<TagCount[]>('get_tags');
 export const getGraphPayload = () => invoke<GraphPayload>('get_graph_payload');
 export const reindex = () => invoke<OpenVaultResult>('reindex');
+/** Embed every note (local ONNX) + k-means into the clusters table; returns the cluster count.
+ *  Slow on first run (downloads the model). Emits index:rebuilt so the graph recolours. */
+export const recomputeClusters = () => invoke<number>('recompute_clusters');
 
 export const readNoteFile = (path: string) => invoke<string>('read_note_file', { path });
 export const saveNoteFile = (path: string, content: string) =>

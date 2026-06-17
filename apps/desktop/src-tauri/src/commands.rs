@@ -11,7 +11,7 @@ use crate::state::{lock, AppState};
 use crate::watcher;
 use serde::Serialize;
 use std::path::PathBuf;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 #[derive(Serialize)]
 pub struct IpcError(pub String);
@@ -173,4 +173,45 @@ pub async fn resolve_link(
 ) -> Result<Option<String>, IpcError> {
     let db = lock(&state.db);
     Ok(queries::resolve_link(&db, &target, &src_path)?)
+}
+
+/// Phase 11: embed every note (local ONNX, all-MiniLM) and k-means them into the
+/// `clusters` table — lighting up the graph's cluster colouring and the MCP
+/// `get_semantic_clusters` tool. The DB lock is held only for the read and the write,
+/// NOT during the slow embed. Returns the number of distinct clusters.
+#[tauri::command]
+pub async fn recompute_clusters(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<usize, IpcError> {
+    let cache = app.path().app_cache_dir()?.join("models");
+    std::fs::create_dir_all(&cache)?;
+
+    let rows = {
+        let conn = lock(&state.db);
+        crate::cluster::read_texts(&conn)?
+    };
+    if rows.is_empty() {
+        return Ok(0);
+    }
+
+    // Embed without the DB lock (model load + inference is slow). Borrow the texts (no
+    // second copy of the corpus); rows stays alive for the zip below.
+    let texts: Vec<&str> = rows.iter().map(|(_, t)| t.as_str()).collect();
+    let mut model = crate::embed::new_model(&cache).map_err(IpcError)?;
+    let vectors = crate::embed::embed_texts(&mut model, &texts).map_err(IpcError)?;
+
+    let items: Vec<(String, Vec<f32>)> = rows.into_iter().map(|(p, _)| p).zip(vectors).collect();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let n = {
+        let mut conn = lock(&state.db);
+        crate::cluster::store_clusters(&mut conn, &items, crate::cluster::K, crate::embed::MODEL_NAME, now)?
+    };
+
+    // Graph + counts changed → Shell's onIndexRebuilt refetches and recolours.
+    let _ = app.emit("index:rebuilt", serde_json::json!({ "note_count": items.len() }));
+    Ok(n)
 }
