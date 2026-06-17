@@ -14,7 +14,7 @@ with a riskiest-premise spike on a tiny scope before its build.
 | 4 | `phase4-webgpu` | WebGPU renderer at fixed 4K + drag node/cluster + zoom/pan + click-open; **spike: React19×design-libs + WebGPU 4K probe + fallback** | ⬜ |
 | 5 | `phase5-search` | FTS5 search + ⌘K command palette (mockup glass) | ✅ done |
 | 6 | `phase6-glass` | Theme-aware **r3f-v9** living backdrop (shadergradient dead on R19) + **eamonliu** liquid-glass lens (dashersw incompatible w/ WebGL) + backdrop-filter chrome; light-theme **tuned**; dual-theme diffs | ✅ done (visual taste pending user eyeball) |
-| 7 | `phase7-terminal` | xterm.js + portable-pty; "Run Claude Code here" | ⬜ |
+| 7 | `phase7-terminal` | xterm.js + portable-pty; embedded shell at cwd=vault (runs Claude Code) | ✅ done (cargo 26/26, user-confirmed live) |
 | 8 | `phase8-activity` | CC activity bus → node light-up + Activity pane. **GATED: hook-install + transcript-tail safety carve-out (ADR)** | ⬜ |
 | 9 | `phase9-formats` | Editor host + MuPDF/PDF.js (true PDF edit) + TipTap/docx bridge; `.md/.txt/.pdf` association via installer; **spike: MuPDF WASM + docx round-trip premises** | ⬜ |
 | 10 | `phase10-mcp` | Read/query MCP sidecar (§14) | ⬜ |
