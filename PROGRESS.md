@@ -1,5 +1,5 @@
 # Rose Glass — Progress & Resume
-#Test
+
 Local-first PKM + live Claude Code activity mirror (Tauri 2 + React 19 + TS-strict).
 **Repo:** `C:\Users\dnoye\rose-glass` · **private remote** `Vividness9816/rose-glass` · branch `master`.
 
