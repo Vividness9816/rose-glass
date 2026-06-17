@@ -323,6 +323,10 @@ export function Shell() {
           onCluster={onCluster}
           clustering={clustering}
           pulseRef={graphPulseRef}
+          onOpenNode={(p) => {
+            setRailView('graph'); // surface the editor for the clicked note
+            void openNote(p);
+          }}
         />
         {railView === 'activity' ? (
           <ActivityPane state={activity} tailing={tailing} vaultOpen={graphData !== undefined} />

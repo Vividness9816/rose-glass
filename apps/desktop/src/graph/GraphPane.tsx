@@ -17,6 +17,7 @@ export function GraphPane({
   onCluster,
   clustering,
   pulseRef,
+  onOpenNode,
 }: {
   theme: Theme;
   data?: GraphData;
@@ -28,9 +29,13 @@ export function GraphPane({
   /** Phase 8: Shell populates this with a node light-up fn (read=violet/modify=rose),
       reading the live renderer so it survives data-driven renderer rebuilds. */
   pulseRef?: MutableRefObject<((rel: string, action: 'read' | 'modify') => void) | null>;
+  /** Phase 4: click a node → open its note (path is the vault-relative key). */
+  onOpenNode?: (path: string) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<GraphRenderer | null>(null);
+  const onOpenNodeRef = useRef(onOpenNode);
+  onOpenNodeRef.current = onOpenNode;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -76,6 +81,84 @@ export function GraphPane({
   useEffect(() => {
     rendererRef.current?.setTheme(resolveGraphTheme());
   }, [theme]);
+
+  // Phase 4 — pan / zoom / drag / click-open. Native listeners (wheel needs
+  // passive:false to preventDefault); all forward to the live renderer's camera.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const drag = { mode: 'none' as 'none' | 'pan' | 'node', id: -1, lastX: 0, lastY: 0, dx0: 0, dy0: 0, moved: false };
+    const at = (e: PointerEvent | WheelEvent): [number, number] => {
+      const r = canvas.getBoundingClientRect();
+      return [e.clientX - r.left, e.clientY - r.top];
+    };
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const r = rendererRef.current;
+      if (!r) return;
+      const [sx, sy] = at(e);
+      r.zoomAtScreen(sx, sy, e.deltaY < 0 ? 1.1 : 1 / 1.1);
+    };
+    const onDown = (e: PointerEvent) => {
+      const r = rendererRef.current;
+      if (!r) return;
+      const [sx, sy] = at(e);
+      const n = r.pickAtScreen(sx, sy);
+      drag.mode = n ? 'node' : 'pan';
+      drag.id = n ? n.id : -1;
+      drag.lastX = sx;
+      drag.lastY = sy;
+      drag.dx0 = sx;
+      drag.dy0 = sy;
+      drag.moved = false;
+      if (n) r.setDragging(n.id);
+      canvas.setPointerCapture(e.pointerId);
+      canvas.style.cursor = n ? 'grabbing' : 'move';
+    };
+    const onMove = (e: PointerEvent) => {
+      const r = rendererRef.current;
+      if (!r) return;
+      const [sx, sy] = at(e);
+      if (drag.mode === 'none') {
+        canvas.style.cursor = r.pickAtScreen(sx, sy) ? 'pointer' : 'default';
+        return;
+      }
+      if (Math.abs(sx - drag.dx0) + Math.abs(sy - drag.dy0) > 3) drag.moved = true;
+      if (drag.mode === 'pan') r.panByScreen(sx - drag.lastX, sy - drag.lastY);
+      else r.moveNodeToScreen(drag.id, sx, sy);
+      drag.lastX = sx;
+      drag.lastY = sy;
+    };
+    const onUp = (e: PointerEvent) => {
+      const r = rendererRef.current;
+      if (r && drag.mode === 'node' && !drag.moved) {
+        const [sx, sy] = at(e);
+        const n = r.pickAtScreen(sx, sy);
+        if (n) onOpenNodeRef.current?.(n.path); // click (no drag) → open
+      }
+      r?.setDragging(null);
+      drag.mode = 'none';
+      drag.id = -1;
+      canvas.style.cursor = 'default';
+      try {
+        canvas.releasePointerCapture(e.pointerId);
+      } catch {
+        /* pointer already released */
+      }
+    };
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    canvas.addEventListener('pointerdown', onDown);
+    canvas.addEventListener('pointermove', onMove);
+    canvas.addEventListener('pointerup', onUp);
+    canvas.addEventListener('pointercancel', onUp);
+    return () => {
+      canvas.removeEventListener('wheel', onWheel);
+      canvas.removeEventListener('pointerdown', onDown);
+      canvas.removeEventListener('pointermove', onMove);
+      canvas.removeEventListener('pointerup', onUp);
+      canvas.removeEventListener('pointercancel', onUp);
+    };
+  }, []);
 
   return (
     <div className="graph-pane">

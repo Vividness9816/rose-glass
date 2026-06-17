@@ -7,6 +7,9 @@
 
 import type { GraphData, GraphEdge, GraphNode } from './types';
 import { type GraphTheme, rgba } from './themeColors';
+import { type Camera, IDENTITY_CAMERA, panBy, screenToWorld, zoomAt } from './camera';
+import { nodeAtWorld } from './hitTest';
+import { stepSimulation } from './simulation';
 
 /** Index nodes for activity light-up by path, with a case-folded fallback map: CC
     can report a different in-vault casing than the on-disk index key on a
@@ -66,6 +69,8 @@ export class GraphRenderer {
   private pulses = new Map<number, { kind: 'read' | 'modify'; t: number }>();
   // Path → node index for activity light-up (case-folded fallback for Windows).
   private pathIndex: { exact: Map<string, GraphNode>; lower: Map<string, GraphNode> };
+  private camera: Camera = IDENTITY_CAMERA; // Phase 4 pan/zoom
+  private draggingId: number | null = null; // pinned node while dragging
 
   constructor(canvas: HTMLCanvasElement, data: GraphData, theme: GraphTheme, dpr = 1) {
     const ctx = canvas.getContext('2d');
@@ -94,6 +99,38 @@ export class GraphRenderer {
   pulse(rel: string, action: 'read' | 'modify') {
     const n = lookupNodeByRel(this.pathIndex, rel);
     if (n) this.pulses.set(n.id, { kind: action, t: 1 });
+  }
+
+  // ── Phase 4 interaction (screen coords = CSS px; the camera maps to world) ──
+  getCamera(): Camera {
+    return this.camera;
+  }
+  zoomAtScreen(sx: number, sy: number, factor: number) {
+    this.camera = zoomAt(this.camera, sx, sy, factor);
+  }
+  panByScreen(dx: number, dy: number) {
+    this.camera = panBy(this.camera, dx, dy);
+  }
+  resetCamera() {
+    this.camera = IDENTITY_CAMERA;
+  }
+  /** Node under a screen point, or undefined (for click-open / drag pickup). */
+  pickAtScreen(sx: number, sy: number): GraphNode | undefined {
+    const [wx, wy] = screenToWorld(this.camera, sx, sy);
+    return nodeAtWorld(this.data.nodes, wx, wy);
+  }
+  /** Move the given node to a screen point (drag); pins it for this frame. */
+  moveNodeToScreen(id: number, sx: number, sy: number) {
+    const n = this.data.nodes.find((m) => m.id === id);
+    if (!n) return;
+    const [wx, wy] = screenToWorld(this.camera, sx, sy);
+    n.x = wx;
+    n.y = wy;
+    n.vx = 0;
+    n.vy = 0;
+  }
+  setDragging(id: number | null) {
+    this.draggingId = id;
   }
 
   setSize(w: number, h: number, dpr = this.dpr) {
@@ -125,42 +162,19 @@ export class GraphRenderer {
 
   private update() {
     this.tick++;
-    const { nodes } = this.data;
-    nodes.forEach((n) => {
-      n.vx += (Math.random() - 0.5) * 0.04;
-      n.vy += (Math.random() - 0.5) * 0.04;
-      // cohesion toward the live centroid of cluster mates (resize-safe)
-      const mates = nodes.filter((m) => m.cluster === n.cluster && m.id !== n.id);
-      if (mates.length) {
-        const avgx = mates.reduce((s, m) => s + m.x, 0) / mates.length;
-        const avgy = mates.reduce((s, m) => s + m.y, 0) / mates.length;
-        n.vx += (avgx - n.x) * 0.003;
-        n.vy += (avgy - n.y) * 0.003;
-      }
-      // collision / repulsion
-      nodes.forEach((m) => {
-        if (m.id === n.id) return;
-        const dx = n.x - m.x;
-        const dy = n.y - m.y;
-        const d2 = dx * dx + dy * dy;
-        const minD = 22 + n.r + m.r;
-        if (d2 < minD * minD && d2 > 0.01) {
-          const d = Math.sqrt(d2);
-          n.vx += (dx / d) * (minD - d) * 0.12;
-          n.vy += (dy / d) * (minD - d) * 0.12;
-        }
-      });
-      n.vx *= 0.88;
-      n.vy *= 0.88;
-      n.x += n.vx;
-      n.y += n.vy;
-      const pad = 30;
-      if (n.x < pad) n.vx += 0.3;
-      if (n.x > this.W - pad) n.vx -= 0.3;
-      if (n.y < pad) n.vy += 0.3;
-      if (n.y > this.H - pad) n.vy -= 0.3;
-      n.phase += 0.02;
-    });
+    // Shared, seedable force model (canvas-2D + WebGPU use the same one).
+    const drag =
+      this.draggingId !== null ? this.data.nodes.find((n) => n.id === this.draggingId) : undefined;
+    const px = drag?.x;
+    const py = drag?.y;
+    stepSimulation(this.data.nodes, this.W, this.H);
+    if (drag && px !== undefined && py !== undefined) {
+      // keep the dragged node pinned under the cursor (others still react to it)
+      drag.x = px;
+      drag.y = py;
+      drag.vx = 0;
+      drag.vy = 0;
+    }
     this.particles = this.particles.filter((p) => {
       p.t += p.speed * p.e.flow;
       if (p.t > 1 || p.t < 0) {
@@ -181,23 +195,25 @@ export class GraphRenderer {
     const { nodes, edges } = this.data;
     const clusterRgb = (c: number) => theme.clusters[c]?.rgb ?? theme.clusters[0].rgb;
 
-    // Map logical → physical px so all draws (incl. text) render at native resolution
-    // (crisp on HiDPI/4K — fixes the canvas-at-CSS-px fuzziness). Reset+scale each frame.
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.clearRect(0, 0, W, H);
-    // ponytail: translucent (was opaque theme.bg) so the §21 living backdrop shows
-    // through behind the graph — the graph floats in the gradient field. The alpha keeps
-    // node/edge contrast; lower it to reveal more motion, raise it to mute the backdrop.
+    const dpr = this.dpr;
+    const cam = this.camera;
+    // 1) clear the full device buffer (identity transform).
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    // 2) SCREEN-space layer (dpr only): translucent field + ambient wash fixed to the
+    //    viewport so the §21 backdrop bleed doesn't pan/zoom with the graph.
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = rgba(theme.bgRgb, GRAPH_BG_ALPHA);
     ctx.fillRect(0, 0, W, H);
-
-    // ambient radial wash (cluster 0 + 1 hues)
     const ag = ctx.createRadialGradient(W * 0.45, H * 0.45, 0, W * 0.45, H * 0.45, W * 0.45);
     ag.addColorStop(0, rgba(clusterRgb(0), 0.06));
     ag.addColorStop(0.5, rgba(clusterRgb(1), 0.03));
     ag.addColorStop(1, 'transparent');
     ctx.fillStyle = ag;
     ctx.fillRect(0, 0, W, H);
+    // 3) WORLD-space layer (dpr × camera): all graph content pans/zooms (HiDPI-crisp,
+    //    since dpr is folded into the transform). Reset+scale each frame.
+    ctx.setTransform(dpr * cam.zoom, 0, 0, dpr * cam.zoom, dpr * cam.tx, dpr * cam.ty);
 
     // slime trails — faint links between nearby same-cluster nodes
     nodes.forEach((n, i) => {
