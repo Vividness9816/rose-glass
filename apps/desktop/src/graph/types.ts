@@ -4,6 +4,9 @@
 
 export interface GraphNode {
   id: number;
+  /** Vault-relative path (the indexer's node key) — used to light up the node on
+      CC activity (Phase 8). Mock nodes get a synthetic key that never matches. */
+  path: string;
   name: string;
   x: number;
   y: number;

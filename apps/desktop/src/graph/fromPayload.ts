@@ -12,6 +12,7 @@ export function payloadToGraphData(p: GraphPayload): GraphData {
     idOf.set(n.path, i);
     return {
       id: i,
+      path: n.path,
       name: n.title || n.path,
       // scatter so physics doesn't start from a degenerate all-at-origin stack
       x: 100 + Math.random() * 600,

@@ -78,6 +78,31 @@ export const onIndexNote = (
 export const onIndexRebuilt = (cb: (e: { note_count: number }) => void): Promise<UnlistenFn> =>
   listen<{ note_count: number }>('index:rebuilt', (e) => cb(e.payload));
 
+// ── Activity (Phase 8) — mirrors src-tauri/src/activity.rs (M1 transcript-tail) ──
+// A scoped CC activity event. The `external` variant carries NO path BY CONSTRUCTION
+// (the Rust enum has no field) — an out-of-vault path never crosses this boundary.
+export type ActivityEvent =
+  | { scope: 'vault'; action: 'read' | 'modify'; rel: string; tool: string; session: string }
+  | { scope: 'external'; action: 'read' | 'modify'; tool: string; session: string };
+
+/** Start the read-only CC activity tail. `generation` (a monotonic token bumped per
+ *  effect run) serializes start↔stop against StrictMode / rapid view-toggle. */
+export const activityStart = (generation: number) =>
+  invoke<void>('activity_start', { generation });
+/** Stop the activity tail (drops the watcher; in-memory only — nothing persisted). */
+export const activityStop = (generation: number) =>
+  invoke<void>('activity_stop', { generation });
+
+export const onActivityEvent = (cb: (e: ActivityEvent) => void): Promise<UnlistenFn> =>
+  listen<ActivityEvent>('activity:event', (e) => cb(e.payload));
+/** Cumulative count of events dropped by the backend per-tick overflow cap. */
+export const onActivityDropped = (cb: (dropped: number) => void): Promise<UnlistenFn> =>
+  listen<{ dropped: number }>('activity:dropped', (e) => cb(e.payload.dropped));
+/** Cumulative count of malformed/unparsable transcript lines — the schema-drift
+ *  health signal (nonzero ⇒ a torn-line bug or a CC transcript-format change). */
+export const onActivityAnomaly = (cb: (anomalies: number) => void): Promise<UnlistenFn> =>
+  listen<{ anomalies: number }>('activity:anomaly', (e) => cb(e.payload.anomalies));
+
 // ── Terminal (PTY) — mirrors src-tauri/src/terminal.rs ──
 // Output is raw bytes (Vec<u8> → number[]) so escape sequences / non-ASCII survive
 // chunk boundaries intact; xterm.write() takes a Uint8Array.

@@ -8,6 +8,32 @@
 import type { GraphData, GraphEdge, GraphNode } from './types';
 import { type GraphTheme, rgba } from './themeColors';
 
+/** Index nodes for activity light-up by path, with a case-folded fallback map: CC
+    can report a different in-vault casing than the on-disk index key on a
+    case-insensitive FS (Windows), so an exact-case Map alone silently misses. */
+export function indexNodesByPath(nodes: GraphNode[]): {
+  exact: Map<string, GraphNode>;
+  lower: Map<string, GraphNode>;
+} {
+  const exact = new Map<string, GraphNode>();
+  const lower = new Map<string, GraphNode>();
+  for (const n of nodes) {
+    exact.set(n.path, n);
+    const lk = n.path.toLowerCase();
+    if (!lower.has(lk)) lower.set(lk, n); // first wins; exact match is still preferred at lookup
+  }
+  return { exact, lower };
+}
+
+/** Look up a node for an activity `rel`: exact match wins (correct on case-sensitive
+    vaults); a case-folded fallback catches Windows casing divergence. */
+export function lookupNodeByRel(
+  idx: { exact: Map<string, GraphNode>; lower: Map<string, GraphNode> },
+  rel: string,
+): GraphNode | undefined {
+  return idx.exact.get(rel) ?? idx.lower.get(rel.toLowerCase());
+}
+
 /** Graph-field opacity over the §21 living backdrop. 1 = opaque (backdrop hidden),
     lower = more motion bleeds through. The user's visibility dial for Phase 6. */
 const GRAPH_BG_ALPHA = 0.4;
@@ -36,6 +62,10 @@ export class GraphRenderer {
   private tick = 0;
   private raf = 0;
   private running = false;
+  // Phase 8 — per-node CC-activity flares: nodeId → {kind, t} where t decays 1→0.
+  private pulses = new Map<number, { kind: 'read' | 'modify'; t: number }>();
+  // Path → node index for activity light-up (case-folded fallback for Windows).
+  private pathIndex: { exact: Map<string, GraphNode>; lower: Map<string, GraphNode> };
 
   constructor(canvas: HTMLCanvasElement, data: GraphData, theme: GraphTheme, dpr = 1) {
     const ctx = canvas.getContext('2d');
@@ -44,6 +74,7 @@ export class GraphRenderer {
     this.data = data;
     this.theme = theme;
     this.dpr = dpr;
+    this.pathIndex = indexNodesByPath(this.data.nodes);
     // GraphPane sizes the backing store to physical px (w*dpr); work in logical px.
     this.W = canvas.width / dpr;
     this.H = canvas.height / dpr;
@@ -54,6 +85,15 @@ export class GraphRenderer {
 
   setTheme(theme: GraphTheme) {
     this.theme = theme;
+  }
+
+  /** Phase 8: light up the node for `rel` — read=violet pulse, modify=rose flare
+      (A6). The rel carries CC's REPORTED case; lookup is case-folded (Windows) so a
+      casing divergence from the on-disk index key still matches. No-op if `rel`
+      isn't a graph node (e.g. an in-vault non-note file). */
+  pulse(rel: string, action: 'read' | 'modify') {
+    const n = lookupNodeByRel(this.pathIndex, rel);
+    if (n) this.pulses.set(n.id, { kind: action, t: 1 });
   }
 
   setSize(w: number, h: number, dpr = this.dpr) {
@@ -128,6 +168,11 @@ export class GraphRenderer {
         return false;
       }
       return true;
+    });
+    // Phase 8 — decay activity flares toward 0; drop when spent.
+    this.pulses.forEach((p, id) => {
+      p.t *= 0.95;
+      if (p.t < 0.02) this.pulses.delete(id);
     });
   }
 
@@ -313,6 +358,27 @@ export class GraphRenderer {
         ctx.lineWidth = 0.5;
         ctx.stroke();
       }
+    });
+
+    // Phase 8 — CC activity flares overlaid on their nodes: read=violet pulse,
+    // modify=rose flare (A6), each an expanding ring that fades as `t` decays.
+    this.pulses.forEach((p, id) => {
+      const n = nodes[id];
+      if (!n) return;
+      const col = p.kind === 'read' ? theme.activityRead : theme.activityModify;
+      const rad = n.r + 6 + (1 - p.t) * 22;
+      const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, rad);
+      g.addColorStop(0, rgba(col, 0.5 * p.t));
+      g.addColorStop(1, 'transparent');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, rad, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, rad, 0, Math.PI * 2);
+      ctx.strokeStyle = rgba(col, 0.7 * p.t);
+      ctx.lineWidth = 2;
+      ctx.stroke();
     });
   }
 }

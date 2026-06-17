@@ -15,6 +15,8 @@ export interface GraphTheme {
   clusters: { accent: string; rgb: RGB }[];
   crossEdge: RGB;
   label: RGB;
+  activityRead: RGB; // Phase 8 — CC read lights a node (violet pulse)
+  activityModify: RGB; // Phase 8 — CC modify lights a node (rose flare)
 }
 
 let probe: HTMLDivElement | null = null;
@@ -50,5 +52,7 @@ export function resolveGraphTheme(): GraphTheme {
     clusters,
     crossEdge: resolve('var(--graph-cross-edge)'),
     label: resolve('var(--text-1)'),
+    activityRead: resolve('var(--violet)'),
+    activityModify: resolve('var(--rose)'),
   };
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type MutableRefObject } from 'react';
 import type { Theme } from '../appearance/theme';
 import type { GraphData } from './types';
 import { buildMockGraph } from './mockGraph';
@@ -16,6 +16,7 @@ export function GraphPane({
   onToggleLens,
   onCluster,
   clustering,
+  pulseRef,
 }: {
   theme: Theme;
   data?: GraphData;
@@ -24,6 +25,9 @@ export function GraphPane({
   onToggleLens?: () => void;
   onCluster?: () => void;
   clustering?: boolean;
+  /** Phase 8: Shell populates this with a node light-up fn (read=violet/modify=rose),
+      reading the live renderer so it survives data-driven renderer rebuilds. */
+  pulseRef?: MutableRefObject<((rel: string, action: 'read' | 'modify') => void) | null>;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<GraphRenderer | null>(null);
@@ -32,6 +36,7 @@ export function GraphPane({
     const canvas = canvasRef.current;
     if (!canvas) return;
     let renderer: GraphRenderer | null = null;
+    if (pulseRef) pulseRef.current = (rel, action) => rendererRef.current?.pulse(rel, action);
 
     // Backing store at device pixels (crisp text/graph on HiDPI/4K); renderer works in CSS px.
     const sizeCanvas = () => {
@@ -64,8 +69,9 @@ export function GraphPane({
       ro.disconnect();
       renderer?.stop();
       rendererRef.current = null;
+      if (pulseRef) pulseRef.current = null;
     };
-  }, [data]);
+  }, [data, pulseRef]);
 
   useEffect(() => {
     rendererRef.current?.setTheme(resolveGraphTheme());

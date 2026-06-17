@@ -1,8 +1,6 @@
 /* 52px icon rail (mockup .sidebar). Active = rose-glow bg + 2px left indicator.
-   Navigation wiring lands with the panes it switches; here the active item is
-   static (Graph) to match the mockup. */
-
-import { useState } from 'react';
+   Controlled by Shell: clicking ◎ Activity swaps the right pane to the Activity
+   mirror (Phase 8); other items just move the highlight until their pane lands. */
 
 interface RailItem {
   id: string;
@@ -22,15 +20,20 @@ const BOTTOM: RailItem[] = [
   { id: 'settings', glyph: '⚙', title: 'Settings' },
 ];
 
-export function IconRail() {
-  const [active, setActive] = useState('graph');
+export function IconRail({
+  active,
+  onSelect,
+}: {
+  active: string;
+  onSelect: (id: string) => void;
+}) {
   const renderItem = (it: RailItem) => (
     <button
       key={it.id}
       className={`sb-icon${active === it.id ? ' active' : ''}`}
       title={it.title}
       type="button"
-      onClick={() => setActive(it.id)}
+      onClick={() => onSelect(it.id)}
     >
       {it.glyph}
     </button>

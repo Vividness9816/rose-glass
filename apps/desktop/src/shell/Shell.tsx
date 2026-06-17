@@ -21,15 +21,28 @@ import { Backdrop } from '../backdrop/Backdrop';
 import { LiquidGlassLens } from '../backdrop/LiquidGlassLens';
 import { TerminalPane } from '../terminal/TerminalPane';
 import { CommandPalette } from '../command/CommandPalette';
+import { ActivityPane } from '../activity/ActivityPane';
+import {
+  emptyActivity,
+  pushActivity,
+  setAnomalies,
+  setDropped,
+  type ActivityState,
+} from '../activity/ring';
 import { Titlebar } from './Titlebar';
 import { IconRail } from './IconRail';
 import { EditorPane } from './EditorPane';
 import { StatusBar } from './StatusBar';
 import {
+  activityStart,
+  activityStop,
   getBacklinks,
   getGraphPayload,
   getNote,
   inTauri,
+  onActivityAnomaly,
+  onActivityDropped,
+  onActivityEvent,
   onIndexNote,
   onIndexRebuilt,
   openVault,
@@ -57,6 +70,16 @@ export function Shell() {
   const [lensOn, setLensOn] = useState(false); // eamonliu liquid-glass graph lens; off by default
   const [terminalOpen, setTerminalOpen] = useState(false); // Ctrl+` toggles the terminal drawer
   const [clustering, setClustering] = useState(false); // Phase 11 embed+cluster in progress
+  const [railView, setRailView] = useState('graph'); // which IconRail view; 'activity' swaps the right pane
+  const [activity, setActivity] = useState<ActivityState>(emptyActivity); // Phase 8 ephemeral ring
+  const [tailing, setTailing] = useState(false); // is the CC activity tail actually running
+
+  // Phase 8: Shell calls this to light up a node on CC activity; GraphPane fills it
+  // with a closure over the live renderer (survives data-driven renderer rebuilds).
+  const graphPulseRef = useRef<((rel: string, action: 'read' | 'modify') => void) | null>(null);
+  // Monotonic token bumped per activity-effect run; serializes start↔stop so a
+  // StrictMode/rapid-toggle stale stop can't drop a newer start's tail watcher.
+  const activityGenRef = useRef(0);
 
   const openNotePathRef = useRef<string | null>(null);
   const isDirtyRef = useRef(false);
@@ -246,13 +269,50 @@ export function Shell() {
     };
   }, [refreshGraph]);
 
+  // Phase 8: while the Activity view is open, tail CC sessions (read-only, ADR-20260617
+  // M1). In-vault events pulse their node (read=violet/modify=rose); all events list in
+  // the pane. Stopping the view drops the tail — ephemeral, nothing persisted (§19.9).
+  useEffect(() => {
+    if (railView !== 'activity' || !inTauri()) return;
+    const generation = (activityGenRef.current += 1);
+    let unEv: (() => void) | undefined;
+    let unDrop: (() => void) | undefined;
+    let unAnom: (() => void) | undefined;
+    let cancelled = false;
+    activityStart(generation)
+      .then(() => {
+        if (!cancelled) setTailing(true);
+      })
+      .catch((e) => console.error('activity start failed:', e));
+    onActivityEvent((ev) => {
+      setActivity((s) => pushActivity(s, ev, Date.now()));
+      if (ev.scope === 'vault') graphPulseRef.current?.(ev.rel, ev.action);
+    })
+      .then((u) => (cancelled ? u() : (unEv = u)))
+      .catch(() => {});
+    onActivityDropped((n) => setActivity((s) => setDropped(s, n)))
+      .then((u) => (cancelled ? u() : (unDrop = u)))
+      .catch(() => {});
+    onActivityAnomaly((n) => setActivity((s) => setAnomalies(s, n)))
+      .then((u) => (cancelled ? u() : (unAnom = u)))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      setTailing(false);
+      unEv?.();
+      unDrop?.();
+      unAnom?.();
+      activityStop(generation).catch(() => {});
+    };
+  }, [railView]);
+
   return (
     <>
     <Backdrop theme={theme} />
     {lensOn && <LiquidGlassLens theme={theme} />}
     <div className="app-shell">
       <Titlebar vault={vault} onSearch={openPalette} />
-      <IconRail />
+      <IconRail active={railView} onSelect={setRailView} />
       <div className="main-area">
         <GraphPane
           theme={theme}
@@ -262,15 +322,20 @@ export function Shell() {
           onToggleLens={() => setLensOn((v) => !v)}
           onCluster={onCluster}
           clustering={clustering}
+          pulseRef={graphPulseRef}
         />
-        <EditorPane
-          note={note}
-          doc={doc}
-          backlinks={backlinks}
-          onChangeDoc={onChangeDoc}
-          onOpenPath={openNote}
-          onWikiClick={onWikiClick}
-        />
+        {railView === 'activity' ? (
+          <ActivityPane state={activity} tailing={tailing} vaultOpen={graphData !== undefined} />
+        ) : (
+          <EditorPane
+            note={note}
+            doc={doc}
+            backlinks={backlinks}
+            onChangeDoc={onChangeDoc}
+            onOpenPath={openNote}
+            onWikiClick={onWikiClick}
+          />
+        )}
       </div>
       <StatusBar
         notes={counts.notes}

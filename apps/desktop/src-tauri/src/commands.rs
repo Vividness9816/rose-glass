@@ -215,3 +215,49 @@ pub async fn recompute_clusters(
     let _ = app.emit("index:rebuilt", serde_json::json!({ "note_count": items.len() }));
     Ok(n)
 }
+
+/// Phase 8: start the read-only CC activity tail (ADR-20260617 M1 — transcript-tail
+/// only; no `settings.json` mutation). The `generation` (a monotonic token bumped per
+/// frontend effect run) serializes against `activity_stop` so a StrictMode / rapid
+/// view-toggle re-mount can't leave a dead tail or leak a watcher. The whole spawn +
+/// store runs UNDER the lock (no `.await` held), serializing it against stop. Emits
+/// `activity:event` / `activity:dropped` / `activity:anomaly`.
+#[tauri::command]
+pub async fn activity_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    generation: u64,
+) -> Result<(), IpcError> {
+    let mut g = lock(&state.activity);
+    if !crate::activity::should_start(g.0, g.1.is_some(), generation) {
+        return Ok(()); // a newer/equal start already owns the tail
+    }
+    let handle = crate::activity::spawn(app.clone(), state.vault_root.clone()).map_err(IpcError)?;
+    g.0 = generation;
+    g.1 = Some(handle); // assigning drops any previous watcher (stops the old tail)
+    Ok(())
+}
+
+/// Phase 8: stop the activity tail (drop the watcher → worker channel closes →
+/// worker exits). Only clears if no NEWER start has taken over (`generation` gate),
+/// so a stale stop can't drop a live newer watcher. In-memory only — nothing persisted.
+#[tauri::command]
+pub async fn activity_stop(state: State<'_, AppState>, generation: u64) -> Result<(), IpcError> {
+    let mut g = lock(&state.activity);
+    if crate::activity::should_stop(g.0, generation) {
+        g.1 = None;
+    }
+    Ok(())
+}
+
+/// Phase 8: DRY-RUN the deferred M2 global-hook install (ADR-20260617). Reads
+/// `~/.claude/settings.json` READ-ONLY and reports what arming would change +
+/// whether uninstall round-trips. There is NO code path here that writes
+/// settings.json — arming the live mutation is a future, attended, user-OK'd act.
+#[tauri::command]
+pub async fn activity_hook_plan() -> Result<String, IpcError> {
+    let path = crate::activity::cc_settings_path()
+        .ok_or_else(|| IpcError("cannot resolve ~/.claude/settings.json".into()))?;
+    let json = std::fs::read_to_string(&path)?;
+    crate::installer::dry_run_summary(&json).map_err(IpcError)
+}

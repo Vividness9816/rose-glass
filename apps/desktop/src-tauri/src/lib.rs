@@ -1,5 +1,7 @@
+mod activity;
 mod cluster;
 mod commands;
+mod installer;
 pub mod db; // exposed for the rose-glass-mcp sidecar bin (read surface — §14)
 mod embed;
 mod fs_safe;
@@ -38,6 +40,9 @@ pub fn run() {
             commands::save_note_file,
             commands::resolve_link,
             commands::recompute_clusters,
+            commands::activity_start,
+            commands::activity_stop,
+            commands::activity_hook_plan,
             terminal::pty_spawn,
             terminal::pty_write,
             terminal::pty_resize,

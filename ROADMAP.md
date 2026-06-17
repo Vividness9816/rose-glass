@@ -15,7 +15,7 @@ with a riskiest-premise spike on a tiny scope before its build.
 | 5 | `phase5-search` | FTS5 search + ⌘K command palette (mockup glass) | ✅ done |
 | 6 | `phase6-glass` | Theme-aware **r3f-v9** living backdrop (shadergradient dead on R19) + **eamonliu** liquid-glass lens (dashersw incompatible w/ WebGL) + backdrop-filter chrome; light-theme **tuned**; dual-theme diffs | ✅ done (visual taste pending user eyeball) |
 | 7 | `phase7-terminal` | xterm.js + portable-pty; embedded shell at cwd=vault (runs Claude Code) | ✅ done (cargo 26/26, user-confirmed live) |
-| 8 | `phase8-activity` | CC activity bus → node light-up + Activity pane. **GATED: hook-install + transcript-tail safety carve-out (ADR)** | ⬜ |
+| 8 | `phase8-activity` | CC activity bus → node light-up + Activity pane (M1 transcript-tail; M2 global hook **deferred** per ADR-20260617) | 🟡 M1 done (built + 3-lens reviewed, cargo 52/52; live-eyeball + M2-arming = morning) |
 | 9 | `phase9-formats` | Editor host + MuPDF/PDF.js (true PDF edit) + TipTap/docx bridge; `.md/.txt/.pdf` association via installer; **spike: MuPDF WASM + docx round-trip premises** | ⬜ |
 | 10 | `phase10-mcp` | Read-only MCP sidecar (search + get_semantic_clusters) over stdio | ✅ done (cargo 35/35, e2e stdio proof) |
 | 11 | `phase11-clusters` | Local neural embeddings (all-MiniLM/ONNX) + k-means → `clusters` table; graph cluster colouring + MCP clusters | ✅ done (cargo 41/41 + real-model semantic test) |

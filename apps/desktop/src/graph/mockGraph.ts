@@ -37,7 +37,8 @@ export function buildMockGraph(W: number, H: number): GraphData {
       const a = (i / count) * Math.PI * 2;
       const r = 38 + Math.random() * 50;
       nodes.push({
-        id: ni++,
+        id: ni,
+        path: `mock/${ni++}.md`, // synthetic — never matches a real activity rel
         name: NOTE_NAMES[(ci * 6 + i) % NOTE_NAMES.length],
         x: cx[ci] + Math.cos(a) * r + (Math.random() - 0.5) * 20,
         y: cy[ci] + Math.sin(a) * r + (Math.random() - 0.5) * 20,
