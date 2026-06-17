@@ -34,14 +34,26 @@ Local-first PKM + live Claude Code activity mirror (Tauri 2 + React 19 + TS-stri
 - **Phase 8 — activity bus**: ⚠ **BINDING SAFETY CARVE-OUT (ADR)** — the global CC-hook install (`~/.claude/settings.json`) + `~/.claude/projects/**/*.jsonl` transcript-tail need **explicit user consent** + atomic backup/validate + `127.0.0.1`-only + secret redaction + uninstall. Do not touch settings.json autonomously.
 
 ## Resume / verify
+Run the app **from inside the repo** (never from `C:\Users\dnoye` — pnpm junction-dupes the
+project there → 4× concurrent `tauri dev` colliding on the strict :1420 port):
 ```
-cd C:\Users\dnoye\rose-glass
-pnpm install
-pnpm --filter @rose-glass/desktop tauri dev          # run the app; open a real folder of .md to see indexer+editor+search live
-pnpm --filter @rose-glass/desktop exec tsc --noEmit
-pnpm --filter @rose-glass/desktop test               # vitest
-cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+cd C:\Users\dnoye\rose-glass\apps\desktop
+pnpm tauri dev     # open a folder of .md → indexer/editor/search live · Ctrl+` terminal · ◎ Lens · Clusters button
 ```
+Gates (from `C:\Users\dnoye\rose-glass`):
+```
+pnpm --filter @rose-glass/desktop exec tsc --noEmit                               # 0
+pnpm --filter @rose-glass/desktop test                                            # vitest 27/27
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml                      # 41/41
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -- --ignored         # +2 ONNX tests (need the cached all-MiniLM model)
+cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings   # 0
+```
+
+### Resume gotchas (this session)
+- **Two cargo bins**: `desktop` (app) + `rose-glass-mcp` (sidecar). `default-run=desktop` keeps `tauri dev` working; run the sidecar via `cargo run --bin rose-glass-mcp -- --vault <dir>`.
+- **Phase 11 model**: the first **Clusters** click downloads all-MiniLM (~90MB) to the app cache, then offline. The two `#[ignore]d` ONNX tests reuse a cached model under `%TEMP%\rg-fastembed-cache`.
+- **cargo target lock**: while `tauri dev` runs (or a stale test binary lives), a separate `cargo test` can hit `LNK1104` on a held binary. Kill stale `cargo`/`rustc` first, or verify in a separate `CARGO_TARGET_DIR` (cold but contention-free).
+- **shadergradient is dead on React 19** (bundles r3f v8); the backdrop is hand-written GLSL on `@react-three/fiber@9`. **dashersw glass** can't sample WebGL (html2canvas) → using **eamonliu** liquid-glass. (See [[reference_design_libs_toolkit]].)
 
 ## Working pattern (what's been succeeding)
 design-workflow (big/version-sensitive phases) → inline verified implementation → 3-lens adversarial-review workflow → fix confirmed findings (+ regression tests) → phase-scoped commit + push → update `STATUS.md`+`ROADMAP.md`. Ponytail throughout; commit only verified work; `# self-audit-ok` appended to commit commands (self-audit PreToolUse hook). cargo runs need `--manifest-path apps/desktop/src-tauri/Cargo.toml` (Bash cwd drifts).
