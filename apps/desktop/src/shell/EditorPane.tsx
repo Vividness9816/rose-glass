@@ -3,6 +3,7 @@
 
 import type { BacklinkDto, NoteDto } from '../ipc';
 import { CodeMirrorHost } from '../editor/CodeMirrorHost';
+import { editorKind, formatLabel } from '../editor/editorKind';
 
 interface Props {
   note: NoteDto | null;
@@ -60,13 +61,25 @@ export function EditorPane({ note, doc, backlinks, onChangeDoc, onOpenPath, onWi
           </div>
         )}
 
-        <CodeMirrorHost
-          className="note-body cm-host"
-          doc={doc}
-          notePath={note?.path ?? null}
-          onChangeDoc={onChangeDoc}
-          onWikiClick={onWikiClick}
-        />
+        {note && editorKind(note.path) !== 'markdown' ? (
+          <div className="format-placeholder">
+            <div className="fp-icon">◫</div>
+            <div className="fp-title">{formatLabel(editorKind(note.path))} — in-app editing coming</div>
+            <div className="fp-note">
+              {note.path.split('/').pop()} opens here once the format-engine increment
+              lands (PDF.js/MuPDF for PDF, TipTap + docx bridge for Word). Markdown and
+              text edit live today.
+            </div>
+          </div>
+        ) : (
+          <CodeMirrorHost
+            className="note-body cm-host"
+            doc={doc}
+            notePath={note?.path ?? null}
+            onChangeDoc={onChangeDoc}
+            onWikiClick={onWikiClick}
+          />
+        )}
 
         {backlinks.length > 0 && (
           <div className="backlinks">
