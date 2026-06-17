@@ -16,12 +16,12 @@ with a riskiest-premise spike on a tiny scope before its build.
 | 6 | `phase6-glass` | Theme-aware **r3f-v9** living backdrop (shadergradient dead on R19) + **eamonliu** liquid-glass lens (dashersw incompatible w/ WebGL) + backdrop-filter chrome; light-theme **tuned**; dual-theme diffs | ✅ done (visual taste pending user eyeball) |
 | 7 | `phase7-terminal` | xterm.js + portable-pty; embedded shell at cwd=vault (runs Claude Code) | ✅ done (cargo 26/26, user-confirmed live) |
 | 8 | `phase8-activity` | CC activity bus → node light-up + Activity pane (M1 transcript-tail; M2 global hook **deferred** per ADR-20260617) | 🟡 M1 done (built + 3-lens reviewed, cargo 52/52; live-eyeball + M2-arming = morning) |
-| 9 | `phase9-formats` | Editor host + MuPDF/PDF.js (true PDF edit) + TipTap/docx bridge; `.md/.txt/.pdf` association via installer; **spike: MuPDF WASM + docx round-trip premises** | 🟡 foundation: editorKind router + `.md/.txt/.pdf` file associations DONE (vitest 50/50); engines (PDF.js/MuPDF + TipTap/docx) + binary IO = focused increment w/ app-window eyeball (`phase9-formats`) |
+| 9 | `phase9-formats` | Editor engines — **lossless-only (ADR-20260617, scope revised from "true PDF edit/TipTap+docx round-trip")**: PDF view-only (PDF.js) + docx view (mammoth) + edit-as-sibling-md + binary-read IPC; `.md/.txt/.pdf` association | 🟢 BUILT + 3-lens-reviewed (14/14 fixed), commit `40d756f`; gates green (tsc/vitest 56/vite + cargo 52/clippy). NO MuPDF/TipTap/pdf-lib/docx-writer, NO binary indexing (all dropped/deferred per ADR). **Remaining: LIVE in-app PDF/docx render = user app-window eyeball** (`phase9-formats`) |
 | 10 | `phase10-mcp` | Read-only MCP sidecar (search + get_semantic_clusters) over stdio | ✅ done (cargo 35/35, e2e stdio proof) |
 | 11 | `phase11-clusters` | Local neural embeddings (all-MiniLM/ONNX) + k-means → `clusters` table; graph cluster colouring + MCP clusters | ✅ done (cargo 41/41 + real-model semantic test) |
 | 12 | `phase12-v1` | Full §20 acceptance gate | ⬜ |
 
 ## Binding preconditions (from ADR-20260616)
 - **Phase 8** ships the §11.4 global-hook install + `~/.claude/projects` transcript-tail ONLY behind: explicit user OK · atomic `settings.json` backup + temp-write/rename + re-parse-validate-all-entries · `127.0.0.1`-only endpoint · no transcript persistence · secret-path redaction/exclusion · working uninstall.
-- **Phase 4 (WebGPU)** and **Phase 9 (MuPDF/docx)** open with a premise spike — never assume the hard pillar works; prove it on a tiny scope first.
+- **Phase 4 (WebGPU)** and **Phase 9 (PDF/docx engines)** open with a premise spike — never assume the hard pillar works; prove it on a tiny scope first. (Phase 9's spike proved pdf-lib *can* edit a PDF but mammoth is read-only → ADR-20260617 chose lossless view-only + edit-as-sibling-md over a lossy writer.)
 - Every `proven` row in STATUS.md cites a commit scope + a re-runnable artifact. No prose "verified."

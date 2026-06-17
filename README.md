@@ -3,25 +3,32 @@
 A **local-first, Obsidian-style PKM** that is also a **live mirror of Claude Code's activity.**
 A folder of markdown becomes a navigable, queryable archive — links, backlinks, tags, full-text
 search, a living force-directed knowledge graph — and the graph **lights up in real time as any
-Claude Code session reads or modifies files.** It edits documents in-app across many formats and
-embeds a terminal that runs Claude Code directly.
+Claude Code session reads or modifies files.** It edits Markdown live, views PDFs and Word
+documents in-app (editing Word as a Markdown sibling), and embeds a terminal that runs Claude
+Code directly.
 
 > **The vault is a folder of markdown. The app is a lens — and the lens glows where the work is happening.**
 
 ## Status
 
-Foundation increment (Phase 0/1 + the canvas-2D graph leg) is built. See **[ROADMAP.md](ROADMAP.md)**
-for the full phase plan and **[STATUS.md](STATUS.md)** for §20 acceptance progress (proven / stubbed
-/ untouched, each proven row citing a commit + artifact). Execution strategy is recorded in
-`~/.claude/second-brain/decisions/ADR-20260616-rose-glass-execution-strategy.md`.
+Phases 0–11 are built, reviewed, and committed: shell, vault indexer + SQLite/FTS5 + watcher,
+CodeMirror 6 editor, ⌘K search, living backdrop + glass, embedded terminal, CC activity mirror
+(M1 transcript-tail), WebGPU graph renderer, read-only MCP sidecar, neural clusters, and the
+**lossless-only editor engines** (PDF view-only + Word view/edit-as-Markdown-sibling). Remaining
+to v1.0: a few live app-window eyeball checks and the **Phase 12** §20 acceptance gate. See
+**[ROADMAP.md](ROADMAP.md)** for the phase plan and **[STATUS.md](STATUS.md)** for §20 acceptance
+progress (each proven row cites a commit + artifact). Execution + key forks are recorded in the
+ADRs under `~/.claude/second-brain/decisions/` (`-rose-glass-execution-strategy`,
+`-rose-glass-phase8-activity-mechanism`, `-rose-glass-phase9-editor-engines`).
 
 ## Stack
 
 - **Shell:** Tauri 2 (Rust) + WebView2
 - **Frontend:** React 19 + TypeScript (strict) + Vite
 - **Monorepo:** pnpm workspace (`apps/desktop`)
-- **Graph:** canvas-2D now (token-driven); WebGPU primary + d3-force later
-- **Store (later):** SQLite owned in Rust (derived, rebuildable from the vault)
+- **Graph:** canvas-2D + WebGPU renderer (token-driven; the mockup's seedable force model)
+- **Store:** SQLite owned in Rust (FTS5 + derived clusters/embeddings; rebuildable from the vault)
+- **Editor:** CodeMirror 6 (Markdown/text); PDF.js (PDF view-only); mammoth (Word view → Markdown sibling)
 - **Fonts:** self-hosted Inter + JetBrains Mono
 
 ## Develop
