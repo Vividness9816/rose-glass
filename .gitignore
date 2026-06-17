@@ -6,6 +6,11 @@ node_modules/
 dist/
 apps/desktop/dist/
 
+# playwright visual-regression run artifacts (baselines under tests/**-snapshots/ ARE committed)
+apps/desktop/test-results/
+apps/desktop/playwright-report/
+apps/desktop/blob-report/
+
 # Rust / Tauri
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/
