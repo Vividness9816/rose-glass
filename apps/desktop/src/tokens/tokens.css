@@ -38,7 +38,11 @@
   /* Text */
   --text-1:  #fdf2f4;
   --text-2:  #c9a0ac;
-  --text-3:  #7d4f5a;
+  /* Lifted from the mockup's #7d4f5a (≈3.0:1) to clear WCAG-AA 4.5:1 on every dark surface
+     text-3 lands on — worst case is the kbd chip on --surface-3 (4.64:1). Same mauve hue;
+     carries the de-emphasized metadata (statusbar / breadcrumb / ⌘K placeholder / kbd).
+     Decided with the user (ADR-impeccable a11y finding, 2026-06-18). */
+  --text-3:  #a6757f;
   --text-4:  #3d1f26;
 
   /* Borders */

@@ -29,16 +29,13 @@ committed HEAD render proofs (graph dark+light, glass chrome, ⌘K palette).
   into pink halos against the saturated rose backdrop. This is a **taste dial, your call**
   (`ShaderBackdrop.tsx` opacity `0.8`, `GraphRenderer.ts` `GRAPH_BG_ALPHA` `0.4`). Not
   changed autonomously.
-- **One objective a11y finding (P2, your decision — touches a locked-from-mockup token):**
-  dark-theme `--text-3 #7d4f5a` is **~3.0:1** on the dark surfaces (WCAG AA wants 4.5:1).
-  It carries de-emphasized metadata only — ⌘K placeholder, statusbar, breadcrumb segs,
-  kbd hints. Body text passes at 8.67:1; **light theme passes everywhere** (text-3 5.4:1).
-  - Path A (keep faithful): leave `--text-3` at the verbatim-mockup value; accept the AA
-    gap on recessive metadata.
-  - Path B (fix AA, one token): bump dark `--text-3` to ≈`#a06f7b` (hits 4.5:1, same hue) —
-    A10-clean (one token edit, zero component changes), but a visible lift of the muted text.
-  - *Recommend B* (a11y basics) **if** you're OK with metadata reading slightly less
-    recessive; else A. Say the word and it's a one-line change.
+- **One objective a11y finding — FIXED (2026-06-18, user-approved path B):** dark-theme
+  `--text-3` was `#7d4f5a` (~3.0:1, below WCAG-AA 4.5:1) on the de-emphasized metadata it
+  carries (⌘K placeholder, statusbar, breadcrumb segs, kbd hints). Bumped to **`#a6757f`** —
+  same mauve hue, clears 4.5:1 on **every** dark surface (worst case the kbd chip on
+  `--surface-3` = 4.64:1). A10-clean (one token, zero component edits); A2 visual baselines
+  unchanged (the shift on small text is sub-2%-tolerance — 4/4 still pass). Light theme was
+  already AA-clean and is untouched.
 
 ## The flip-list — open the app, do these, flip §20 🟡→✅
 ```
