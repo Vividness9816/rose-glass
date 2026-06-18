@@ -10,8 +10,29 @@ use crate::indexer::pipeline;
 use crate::state::{lock, AppState};
 use crate::watcher;
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager, State};
+
+/// Canonicalize the vault root once at open-time so scope/skip comparisons are robust
+/// to 8.3 short names, case, and a symlinked vault root. The Windows `\\?\` verbatim
+/// prefix is stripped so the stored root matches the un-prefixed absolute paths both
+/// the file dialog and Claude Code report (else activity scope would classify
+/// everything External). Residual: a symlink INSIDE the vault pointing out is still
+/// classified lexically, not FS-resolved — display-only, `fs_safe` guards real ops
+/// (ADR-20260618-rose-glass-v2-architecture).
+fn canonical_root(p: &Path) -> PathBuf {
+    let c = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    if cfg!(windows) {
+        if let Some(s) = c.to_str() {
+            if let Some(stripped) = s.strip_prefix(r"\\?\") {
+                if !stripped.starts_with("UNC\\") {
+                    return PathBuf::from(stripped);
+                }
+            }
+        }
+    }
+    c
+}
 
 #[derive(Serialize)]
 pub struct IpcError(pub String);
@@ -43,10 +64,13 @@ pub async fn open_vault(
     app: AppHandle,
     path: String,
 ) -> Result<OpenVaultResultDto, IpcError> {
-    let root = PathBuf::from(&path);
-    if !root.is_dir() {
+    let supplied = PathBuf::from(&path);
+    if !supplied.is_dir() {
         return Err(IpcError(format!("not a directory: {path}")));
     }
+    // Canonicalize once here so every downstream comparison (indexer skip, watcher,
+    // activity scope) shares one robust root form.
+    let root = canonical_root(&supplied);
     let db_dir = root.join(".rose-glass");
     std::fs::create_dir_all(&db_dir)?;
     // Keep the derived cache out of the user's vault git repo.
@@ -68,7 +92,9 @@ pub async fn open_vault(
 
     let _ = app.emit("index:rebuilt", serde_json::json!({ "note_count": count }));
     Ok(OpenVaultResultDto {
-        vault: path,
+        // report the canonical root so the frontend's Open-file relativizer matches
+        // the same form the indexer/activity use
+        vault: root.to_string_lossy().to_string(),
         note_count: count as i64,
         rebuilt: true,
     })
@@ -434,5 +460,24 @@ pub async fn activity_hook_disarm() -> Result<String, IpcError> {
         Ok("Disarmed — the rose-glass hook was removed.".into())
     } else {
         Ok("Not armed — nothing to remove.".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_root_strips_verbatim_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = canonical_root(dir.path());
+        // A `\\?\` verbatim prefix would break the lexical scope/skip compares against
+        // the un-prefixed paths the dialog + CC report.
+        assert!(
+            !r.to_string_lossy().starts_with(r"\\?\"),
+            "canonical root must not carry the Windows verbatim prefix: {}",
+            r.display()
+        );
+        assert!(r.is_dir());
     }
 }
