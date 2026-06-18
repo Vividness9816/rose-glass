@@ -70,7 +70,12 @@ export function Shell() {
   const [doc, setDoc] = useState('');
   const [binaryPath, setBinaryPath] = useState<string | null>(null); // Phase 9: open pdf/docx (not an indexed note)
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [terminalOpen, setTerminalOpen] = useState(false); // Ctrl+` toggles the terminal drawer
+  const [terminalOpen, setTerminalOpen] = useState(false); // is the terminal drawer VISIBLE
+  const [terminals, setTerminals] = useState<number[]>([]); // open tab ids — each is a live PTY kept alive while hidden
+  const [activeTerm, setActiveTerm] = useState(-1);
+  const nextTermIdRef = useRef(1);
+  const activeTermRef = useRef(activeTerm);
+  activeTermRef.current = activeTerm;
   const [clustering, setClustering] = useState(false); // Phase 11 embed+cluster in progress
   const [railView, setRailView] = useState('graph'); // which IconRail view; 'activity' swaps the right pane
   const [activity, setActivity] = useState<ActivityState>(emptyActivity); // Phase 8 ephemeral ring
@@ -97,6 +102,34 @@ export function Shell() {
   const closePalette = useCallback(() => {
     setPaletteOpen(false);
     prevFocusRef.current?.focus?.(); // restore focus so keyboard nav isn't lost
+  }, []);
+
+  const addTerminal = useCallback(() => {
+    const id = nextTermIdRef.current++;
+    setTerminals((ts) => [...ts, id]);
+    setActiveTerm(id);
+  }, []);
+
+  // Ctrl+`: first press opens a terminal; later presses just hide/show it (the PTYs stay
+  // alive while hidden — processes are NOT killed). Only the tab × kills a session.
+  const toggleTerminal = useCallback(() => {
+    if (terminals.length === 0) {
+      addTerminal();
+      setTerminalOpen(true);
+    } else {
+      setTerminalOpen((v) => !v);
+    }
+  }, [terminals.length, addTerminal]);
+
+  // Close one tab: unmounting its TerminalPane kills that PTY. Switch active to a neighbour;
+  // hide the drawer when the last tab closes.
+  const closeTerminal = useCallback((id: number) => {
+    setTerminals((ts) => {
+      const next = ts.filter((t) => t !== id);
+      if (next.length === 0) setTerminalOpen(false);
+      else if (id === activeTermRef.current) setActiveTerm(next[next.length - 1]);
+      return next;
+    });
   }, []);
 
   const saver = useMemo(
@@ -140,15 +173,15 @@ export function Shell() {
         e.preventDefault();
         openPalette();
       }
-      // Ctrl/⌘+` toggles the terminal drawer (VSCode-style).
+      // Ctrl/⌘+` opens the terminal (first press) or hides/shows it (keeps PTYs alive).
       if ((e.ctrlKey || e.metaKey) && e.code === 'Backquote') {
         e.preventDefault();
-        setTerminalOpen((v) => !v);
+        toggleTerminal();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [openPalette]);
+  }, [openPalette, toggleTerminal]);
 
   const refreshGraph = useCallback(async (): Promise<GraphPayload | null> => {
     try {
@@ -468,22 +501,66 @@ export function Shell() {
         onToggleTheme={onToggleTheme}
       />
       {paletteOpen && <CommandPalette onClose={closePalette} onOpenNote={openNote} />}
-      {terminalOpen && (
-        <div className="terminal-drawer">
+      {/* Once opened, the drawer stays MOUNTED so its PTYs keep running; Ctrl+` just
+          hides it (display:none). Each tab is a keyed TerminalPane — only the active one
+          shows, the rest stay alive hidden. The tab × unmounts → kills that PTY. */}
+      {terminals.length > 0 && (
+        <div className="terminal-drawer" style={{ display: terminalOpen ? 'flex' : 'none' }}>
           <div className="terminal-header">
-            <span className="terminal-dot" />
-            <span className="terminal-title">terminal — {vault}</span>
+            <div className="terminal-tabs">
+              {terminals.map((id, i) => (
+                <div
+                  key={id}
+                  className={`terminal-tab${id === activeTerm ? ' active' : ''}`}
+                  onClick={() => setActiveTerm(id)}
+                >
+                  <span className="terminal-dot" />
+                  <span className="terminal-tab-label">terminal {i + 1}</span>
+                  <button
+                    className="terminal-tab-close"
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      closeTerminal(id);
+                    }}
+                    title="Close terminal (ends its process)"
+                    aria-label={`Close terminal ${i + 1}`}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              <button
+                className="terminal-tab-add"
+                type="button"
+                onClick={addTerminal}
+                title="New terminal"
+                aria-label="New terminal"
+              >
+                +
+              </button>
+            </div>
             <button
               className="terminal-close"
               type="button"
               onClick={() => setTerminalOpen(false)}
-              title="Close terminal (Ctrl+`)"
-              aria-label="Close terminal"
+              title="Hide terminal (Ctrl+`) — keeps it running"
+              aria-label="Hide terminal"
             >
-              ✕
+              ▾
             </button>
           </div>
-          <TerminalPane theme={theme} />
+          <div className="terminal-body">
+            {terminals.map((id) => (
+              <div
+                key={id}
+                className="terminal-tabpane"
+                style={{ display: id === activeTerm ? 'flex' : 'none' }}
+              >
+                <TerminalPane theme={theme} />
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
