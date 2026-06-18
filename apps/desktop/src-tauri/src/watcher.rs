@@ -6,7 +6,7 @@ use crate::indexer::pipeline;
 use crate::indexer::IndexOutcome;
 use crate::state::lock;
 use notify_debouncer_full::new_debouncer;
-use notify_debouncer_full::notify::{EventKind, RecursiveMode};
+use notify_debouncer_full::notify::RecursiveMode;
 use rusqlite::Connection;
 use std::any::Any;
 use std::path::PathBuf;
@@ -62,7 +62,6 @@ pub fn spawn(
                 return;
             };
             for ev in events {
-                let is_remove = matches!(ev.kind, EventKind::Remove(_));
                 for path in &ev.paths {
                     if !pipeline::is_markdown(path) {
                         continue;
@@ -70,10 +69,15 @@ pub fn spawn(
                     let Some(rel) = pipeline::normalize_rel(&handler_root, path) else {
                         continue;
                     };
-                    let op = if is_remove || !path.exists() {
-                        Op::Delete(rel)
-                    } else {
+                    // Existence is the source of truth, NOT the event kind. An atomic save
+                    // (temp-write + rename-over-target) can surface a Remove event for the
+                    // target even though the file is still there; treating that as a delete
+                    // wrongly evicts the note and closes the open editor mid-edit. So: present
+                    // on disk → (re)index; only truly gone → delete.
+                    let op = if path.exists() {
                         Op::Reindex(rel)
+                    } else {
+                        Op::Delete(rel)
                     };
                     let _ = tx.send(op);
                 }
