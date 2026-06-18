@@ -26,10 +26,15 @@ pass shipped (all gated green per commit; `/impeccable` methodology for the visu
 ## Round-2 live feedback (2026-06-17 PM) — NEXT (all pending)
 User re-verified in-app. **Good:** graph life, theme flip, Search, All, docx fix, session
 persistence, terminal (base), Properties (base). **M2:** user armed it in-app (verification
-steps handed off). Outstanding (next session — primary task GPU parity, then these):
-- **GPU shader parity** (Ph4, was deprioritized): grow the WGSL to match the 2D look —
-  node auras/glow, tributary particles, curved edges + arrowheads, hub rings; ALSO port the
-  Focus dimming + the theme node-inversion to the GPU path (both currently 2D-only / no-op).
+steps handed off). Outstanding (next session — the round-2 fixes; GPU parity is now DONE):
+- ✅ **GPU shader parity DONE** (Ph4, 2026-06-17): the WGSL was grown to the full 2D look via
+  3 instanced pipelines (sprite/ring/ribbon) — cluster auras/glow, curved edges + arrowheads +
+  trails, tributary particles, hub rings + orbiting dots — and the **Focus dimming** + **theme
+  bullseye inversion** ports (both were 2D-only no-ops). Riskiest-premise spike first (`ribbon.ts`
+  bezier→ribbon tessellator, pure + 8/8 unit-tested). 3-lens reviewed (7 LOW, all fixed).
+  GPU-verified dark+light on the RTX 5090 (`docs/proof/phase4-parity-*.png`). Only hub text labels
+  stay 2D (glyph-atlas ceiling). **Note:** the user's "focus doesn't dim" was likely the GPU no-op
+  path — now ported; the 2D-path Focus bug below still needs an end-to-end check.
 - **BUG — Focus doesn't dim** (2D): "focus doesn't seem to work." Investigate
   `GraphRenderer.setFocus` / `GraphPane` scope effect — likely `activePath` not matching a node
   key (→ focusSet=null → no dim), a renderer-ref timing gap, or the user being on the GPU (no-op) path.
@@ -66,7 +71,7 @@ steps handed off). Outstanding (next session — primary task GPU parity, then t
 - **Phase 8 (M1)** — CC activity mirror via **transcript-tail** (read-only `~/.claude/projects/**/*.jsonl`; M2 global hook **deferred**, plan-only, per **ADR-20260617**). Council-decided (5 seats, unanimous): the live `settings.json` write is the one unrecoverable-if-botched unattended action → kept for an attended morning step. **Structural redaction at the Rust source** (the `External` event variant has no path field → an out-of-vault path never crosses IPC); in-vault classification fails CLOSED on `..` escape, case-folded on Windows. Node light-up (read=violet pulse / modify=rose flare, tokenised), muted path-free external rows, a **health row** (liveness/tally/dropped/drift). Bounded drop-oldest ring + partial-line buffering + rotation resync + generation-gated start↔stop. The M2 installer is **plan/validate/uninstall with NO `fs::write`**, proven against the live settings.json read-only (20 hooks preserved + round-trips). 3-lens review: 7 findings, all fixed + regressions. **Live-eyeball on a sanitized vault = morning.**
 - Each phase closed with a **3-lens adversarial review** + fixes + regression tests.
 
-**Latest gates (all green):** `cargo test` 52/52 (+3 `#[ignore]`d on demand) + `clippy` 0 · `tsc` 0 · `vitest` 50/50 · `vite build` 0 · Playwright renders + live WebGL/terminal end-to-end (0 console errors). Proof shots in `docs/proof/`.
+**Latest gates (all green):** `cargo test` 53/53 (+3 `#[ignore]`d on demand) + `clippy` 0 · `tsc` 0 · `vitest` **67/67** (+8 ribbon-tessellation) · `vite build` 0 · A2 visual 4/4 · Playwright renders + live WebGL/terminal end-to-end + **GPU parity GPU-verified on the RTX 5090** (0 console errors bar a cosmetic favicon 404). Proof shots in `docs/proof/`.
 
 ## Next — these need the user in the loop (morning verification)
 This overnight run (2026-06-17): user gave durable consent for the whole plan + Phase-8 order (8 → 4 → 9), "build as much as possible without me, leave the must-verify parts for the morning."

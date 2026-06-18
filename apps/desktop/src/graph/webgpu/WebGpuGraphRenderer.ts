@@ -1,77 +1,158 @@
 /* Phase 4 — WebGPU graph renderer (the §6/§11.3 primary path; canvas-2D is the
-   fallback). Instanced node discs (circle SDF in the fragment shader) + edge lines,
-   sharing the canvas-2D path's `Camera`, `hitTest`, and seedable `stepSimulation`
-   so pan/zoom/drag/click-open and the layout are identical across backends.
+   fallback). It renders the SAME rich look as the canvas-2D `GraphRenderer`
+   (cluster auras / node glow, curved quadratic edges + arrowheads + trails,
+   tributary particles, hub rings + orbiting dots, the theme bullseye inversion,
+   Focus dimming, and CC activity flares) by replaying the 2D path's exact CPU
+   formulas into three instanced GPU pipelines:
 
-   SAFETY (§17 / ADR-20260616): `create()` is the ONLY constructor and it returns
+     • sprite — a unit quad, instanced; per-instance softness picks a HARD disc
+       (cores / particles / orbit dots / highlights) vs a SOFT radial glow
+       (auras / ambient wash / flare fills); a screen-space flag fixes the wash
+       to the viewport (matches the 2D screen-space wash).
+     • ring   — a unit quad, instanced; an annulus SDF for hub rings, the mid
+       ring, the accent strokes, and the flare rings.
+     • ribbon — CPU-tessellated triangle ribbons (see ribbon.ts, unit-tested) for
+       the curved edges / trails / slime / arrowheads (WebGPU has no curve
+       primitive and line-list is a hardware-1px line).
+
+   Layout + interaction are identical to the 2D path (shared Camera / hitTest /
+   seedable stepSimulation). The ONE deliberate gap vs 2D is hub text LABELS —
+   text on WebGPU needs a glyph atlas, disproportionate for a node caption; the
+   2D path keeps labels and is the default. ponytail: labels-on-GPU deferred.
+
+   SAFETY (§17 / ADR-20260616): `create()` is the ONLY constructor and returns
    `null` on ANY init failure (no adapter/device, pipeline validation error, lost
    context) — the caller then keeps the proven canvas-2D renderer. A WebGPU bug can
-   therefore never blank or break the graph; worst case the GPU toggle is a no-op.
+   never blank or break the graph; worst case the GPU toggle is a no-op. All GPU
+   work in `frame()` is guarded: an external device loss surfaces as a throw →
+   stop + onLost → GraphPane rebuilds on canvas-2D. */
 
-   ⚠ BUILT BUT NOT GPU-VERIFIED — the actual render needs a live GPU (the user's
-   RTX 5090) to confirm. tsc + @webgpu/types validate the API surface; the pixels
-   are a pending eyeball. Do not mark A5 "proven" on this path without that.
-
-   FIDELITY: this GPU path renders a REDUCED visual set vs the canvas-2D path —
-   disc nodes + flat-alpha straight edges + a colour/radius pulse, WITHOUT the 2D
-   path's cluster auras, slime trails, tributary particles, hub rings/labels,
-   curved edges, or expanding activity-flare rings. Layout + interaction are
-   identical (shared camera/hitTest/stepSimulation); only the look is leaner. Decide
-   whether to close the gap AFTER the eyeball confirms the simpler look is wanted —
-   don't grow shaders blind. */
-
-import type { GraphData, GraphNode } from '../types';
-import type { GraphTheme } from '../themeColors';
+import type { GraphData, GraphEdge, GraphNode } from '../types';
+import type { GraphTheme, RGB } from '../themeColors';
 import type { GraphRendererLike } from '../Renderer';
 import { type Camera, IDENTITY_CAMERA, panBy, screenToWorld, zoomAt } from '../camera';
 import { nodeAtWorld } from '../hitTest';
 import { stepSimulation } from '../simulation';
 import { indexNodesByPath, lookupNodeByRel } from '../GraphRenderer';
+import { RIBBON_STRIDE, ribbonInto, sampleQuadratic, type RGB01, type Vec2 } from './ribbon';
 
 const GRAPH_BG_ALPHA = 0.4; // matches the canvas-2D path (lets the §21 backdrop bleed through)
+
+const SPRITE_STRIDE = 9; // cx,cy, radius, r,g,b, alpha, soft, screen
+const RING_STRIDE = 8; //   cx,cy, radius, width, r,g,b, alpha
+const SEG_EDGE = 12; // bezier segments per edge ribbon
+const SEG_SLIME = 5; // bezier segments per slime ribbon
+
+interface Particle {
+  e: GraphEdge;
+  t: number;
+  speed: number;
+}
+
+/** Per-frame buffer capacities, derived from graph size. The slime layer is the
+    only O(n²) source (same as the 2D path); cap the ribbon count so a dense vault
+    can't grow the buffer unbounded. ponytail: dropped slime is invisible (alpha
+    0.06); raise SLIME_MAX if a huge vault visibly thins. */
+function caps(data: GraphData) {
+  const N = data.nodes.length;
+  const E = data.edges.length;
+  const slimeMax = N * 4;
+  return {
+    spriteCap: N * 11 + E * 2 + 8,
+    ringCap: N * 5 + 8,
+    slimeMax,
+    // edge ribbons: (base + trail) × SEG_EDGE + a 2-seg arrowhead, ×6 verts/seg
+    ribbonVertCap: E * (SEG_EDGE * 2 * 6 + 2 * 6) + slimeMax * (SEG_SLIME * 6) + 6,
+  };
+}
 
 const SHADER = /* wgsl */ `
 struct Cam { z: vec4<f32>, v: vec4<f32> };       // z=(zoom,tx,ty,_), v=(W,H,_,_)
 @group(0) @binding(0) var<uniform> cam: Cam;
 
-fn toClip(world: vec2<f32>) -> vec2<f32> {
-  let s = world * cam.z.x + cam.z.yz;            // world -> screen (CSS px)
+fn screenToClip(s: vec2<f32>) -> vec2<f32> {
   return vec2<f32>(s.x / cam.v.x * 2.0 - 1.0, 1.0 - s.y / cam.v.y * 2.0);
 }
+fn worldToClip(w: vec2<f32>) -> vec2<f32> {
+  return screenToClip(w * cam.z.x + cam.z.yz);  // world -> screen (CSS px) -> clip
+}
 
-struct NodeOut { @builtin(position) pos: vec4<f32>, @location(0) local: vec2<f32>, @location(1) col: vec3<f32> };
+// ── sprite: soft radial glow (soft>0.5) or hard AA disc ──
+struct SpriteOut {
+  @builtin(position) pos: vec4<f32>,
+  @location(0) local: vec2<f32>,
+  @location(1) col: vec3<f32>,
+  @location(2) a: f32,
+  @location(3) soft: f32,
+};
 @vertex
-fn vs_node(@location(0) corner: vec2<f32>, @location(1) ipos: vec2<f32>, @location(2) ir: f32, @location(3) icol: vec3<f32>) -> NodeOut {
-  var o: NodeOut;
-  o.pos = vec4<f32>(toClip(ipos + corner * ir), 0.0, 1.0);
-  o.local = corner;
-  o.col = icol;
+fn vs_sprite(
+  @location(0) corner: vec2<f32>, @location(1) center: vec2<f32>, @location(2) radius: f32,
+  @location(3) col: vec3<f32>, @location(4) alpha: f32, @location(5) soft: f32, @location(6) screen: f32,
+) -> SpriteOut {
+  var o: SpriteOut;
+  let p = center + corner * radius;
+  let clip = select(worldToClip(p), screenToClip(p), screen > 0.5);
+  o.pos = vec4<f32>(clip, 0.0, 1.0);
+  o.local = corner; o.col = col; o.a = alpha; o.soft = soft;
   return o;
 }
 @fragment
-fn fs_node(@location(0) local: vec2<f32>, @location(1) col: vec3<f32>) -> @location(0) vec4<f32> {
+fn fs_sprite(@location(0) local: vec2<f32>, @location(1) col: vec3<f32>, @location(2) alpha: f32, @location(3) soft: f32) -> @location(0) vec4<f32> {
   let d = length(local);
   if (d > 1.0) { discard; }
-  let a = smoothstep(1.0, 0.80, d);
-  return vec4<f32>(col * a, a);                  // premultiplied alpha
+  let hard = alpha * smoothstep(1.0, 0.82, d);   // AA-edged solid disc
+  let glow = alpha * (1.0 - d);                   // linear radial falloff (matches the 2D gradients)
+  let a = select(hard, glow, soft > 0.5);
+  return vec4<f32>(col * a, a);                    // premultiplied alpha
 }
 
-struct EdgeOut { @builtin(position) pos: vec4<f32>, @location(0) col: vec3<f32> };
+// ── ring: annulus SDF (hub rings / mid ring / accent strokes / flare rings) ──
+struct RingOut {
+  @builtin(position) pos: vec4<f32>,
+  @location(0) local: vec2<f32>,
+  @location(1) col: vec3<f32>,
+  @location(2) a: f32,
+  @location(3) rNorm: f32,
+  @location(4) hwNorm: f32,
+};
 @vertex
-fn vs_edge(@location(0) wpos: vec2<f32>, @location(1) col: vec3<f32>) -> EdgeOut {
-  var o: EdgeOut;
-  o.pos = vec4<f32>(toClip(wpos), 0.0, 1.0);
-  o.col = col;
+fn vs_ring(
+  @location(0) corner: vec2<f32>, @location(1) center: vec2<f32>, @location(2) radius: f32,
+  @location(3) width: f32, @location(4) col: vec3<f32>, @location(5) alpha: f32,
+) -> RingOut {
+  var o: RingOut;
+  let ro = radius + width;                         // inflate the quad to hold the full stroke
+  o.pos = vec4<f32>(worldToClip(center + corner * ro), 0.0, 1.0);
+  o.local = corner; o.col = col; o.a = alpha;
+  o.rNorm = radius / ro;
+  o.hwNorm = max(0.5 * width / ro, 0.0008);
   return o;
 }
 @fragment
-fn fs_edge(@location(0) col: vec3<f32>) -> @location(0) vec4<f32> {
-  return vec4<f32>(col * 0.45, 0.45);            // premultiplied alpha
+fn fs_ring(@location(0) local: vec2<f32>, @location(1) col: vec3<f32>, @location(2) alpha: f32, @location(3) rNorm: f32, @location(4) hwNorm: f32) -> @location(0) vec4<f32> {
+  let d = length(local);
+  let a = alpha * (1.0 - smoothstep(0.0, hwNorm, abs(d - rNorm)));
+  if (a <= 0.0) { discard; }
+  return vec4<f32>(col * a, a);
+}
+
+// ── ribbon: pre-tessellated curved edges / slime / arrowheads ──
+struct RibbonOut { @builtin(position) pos: vec4<f32>, @location(0) col: vec3<f32>, @location(1) a: f32 };
+@vertex
+fn vs_ribbon(@location(0) wp: vec2<f32>, @location(1) col: vec3<f32>, @location(2) alpha: f32) -> RibbonOut {
+  var o: RibbonOut;
+  o.pos = vec4<f32>(worldToClip(wp), 0.0, 1.0);
+  o.col = col; o.a = alpha;
+  return o;
+}
+@fragment
+fn fs_ribbon(@location(0) col: vec3<f32>, @location(1) alpha: f32) -> @location(0) vec4<f32> {
+  return vec4<f32>(col * alpha, alpha);
 }
 `;
 
-const NODE_STRIDE = 6; // x,y,r,r,g,b  (floats per instance)
-const EDGE_STRIDE = 5; // x,y,r,g,b    (floats per edge vertex)
+type DrawOp = { p: 'sprite' | 'ring' | 'ribbon'; first: number; count: number };
 
 export class WebGpuGraphRenderer implements GraphRendererLike {
   private camera: Camera = IDENTITY_CAMERA;
@@ -82,10 +163,20 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
   private dpr: number;
   private raf = 0;
   private running = false;
+  private tick = 0;
+  private particles: Particle[] = [];
   private pulses = new Map<number, { kind: 'read' | 'modify'; t: number }>();
   private pathIndex: { exact: Map<string, GraphNode>; lower: Map<string, GraphNode> };
-  private nodeData: Float32Array;
-  private edgeData: Float32Array;
+  private byId = new Map<number, GraphNode>();
+  private focusSet: Set<number> | null = null;
+  private lostFired = false; // one-shot: external loss can arrive via frame() AND device.lost
+  // per-frame scene buffers (CPU side; reused — no per-frame allocation)
+  private spriteData: Float32Array;
+  private ringData: Float32Array;
+  private ribbonData: Float32Array;
+  private spriteCap: number;
+  private ringCap: number;
+  private slimeMax: number; // cached cap on faint O(n²) slime ribbons (computed once)
 
   private constructor(
     canvas: HTMLCanvasElement,
@@ -94,13 +185,15 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
     dpr: number,
     private device: GPUDevice,
     private ctx: GPUCanvasContext,
-    private nodePipeline: GPURenderPipeline,
-    private edgePipeline: GPURenderPipeline,
+    private spritePipeline: GPURenderPipeline,
+    private ringPipeline: GPURenderPipeline,
+    private ribbonPipeline: GPURenderPipeline,
     private camUB: GPUBuffer,
     private camBind: GPUBindGroup,
     private quadVB: GPUBuffer,
-    private nodeVB: GPUBuffer,
-    private edgeVB: GPUBuffer,
+    private spriteVB: GPUBuffer,
+    private ringVB: GPUBuffer,
+    private ribbonVB: GPUBuffer,
     private onLost: (() => void) | undefined,
   ) {
     this.theme = theme;
@@ -108,8 +201,31 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
     this.W = canvas.width / dpr;
     this.H = canvas.height / dpr;
     this.pathIndex = indexNodesByPath(data.nodes);
-    this.nodeData = new Float32Array(data.nodes.length * NODE_STRIDE);
-    this.edgeData = new Float32Array(data.edges.length * 2 * EDGE_STRIDE);
+    data.nodes.forEach((n) => this.byId.set(n.id, n));
+    data.edges.forEach((e) => {
+      for (let i = 0; i < 2; i++) this.spawnParticle(e);
+    });
+    const c = caps(data);
+    this.spriteCap = c.spriteCap;
+    this.ringCap = c.ringCap;
+    this.slimeMax = c.slimeMax;
+    this.spriteData = new Float32Array(Math.max(1, c.spriteCap) * SPRITE_STRIDE);
+    this.ringData = new Float32Array(Math.max(1, c.ringCap) * RING_STRIDE);
+    this.ribbonData = new Float32Array(Math.max(1, c.ribbonVertCap) * RIBBON_STRIDE);
+    // External device loss (GPU reset / TDR) → fall back to canvas-2D. Registered here
+    // (not in create()) so it shares the one-shot `lostFired` with the frame() catch path;
+    // our own teardown (reason 'destroyed') is ignored.
+    void this.device.lost.then((info) => {
+      if (info.reason !== 'destroyed') this.fireLost();
+    });
+  }
+
+  /** Signal external device loss to the caller exactly once (frame() catch and the
+      device.lost promise can both fire for the same loss). */
+  private fireLost() {
+    if (this.lostFired) return;
+    this.lostFired = true;
+    this.onLost?.();
   }
 
   /** Build the renderer, or return null on ANY failure (caller falls back to 2D).
@@ -129,10 +245,7 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
       const adapter = await gpu.requestAdapter();
       if (!adapter) return null;
       device = await adapter.requestDevice();
-      // External loss → signal the caller (GraphPane) to fall back to canvas-2D.
-      void device.lost.then((info) => {
-        if (info.reason !== 'destroyed') onLost?.();
-      });
+      // device.lost is wired in the constructor (so it shares the one-shot loss guard).
       const ctx = canvas.getContext('webgpu');
       if (!ctx) {
         device.destroy();
@@ -141,6 +254,11 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
       const format = gpu.getPreferredCanvasFormat();
       ctx.configure({ device, format, alphaMode: 'premultiplied' });
 
+      // One error-scope pair around ALL resource creation (pipelines AND buffers) so the
+      // "create() returns null on ANY init failure" contract also covers an over-limit
+      // buffer (a huge vault) — it pops as a validation/OOM error → clean 2D fallback,
+      // not a first-frame device-loss surprise.
+      device.pushErrorScope('out-of-memory');
       device.pushErrorScope('validation');
       const module = device.createShaderModule({ code: SHADER });
       const bgl = device.createBindGroupLayout({
@@ -151,74 +269,119 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
         color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
         alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
       };
-      const nodePipeline = device.createRenderPipeline({
+      const quadLayout: GPUVertexBufferLayout = {
+        arrayStride: 8,
+        stepMode: 'vertex',
+        attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }],
+      };
+      const spritePipeline = device.createRenderPipeline({
         layout,
         vertex: {
           module,
-          entryPoint: 'vs_node',
+          entryPoint: 'vs_sprite',
           buffers: [
-            { arrayStride: 8, stepMode: 'vertex', attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }] },
+            quadLayout,
             {
-              arrayStride: NODE_STRIDE * 4,
+              arrayStride: SPRITE_STRIDE * 4,
               stepMode: 'instance',
               attributes: [
-                { shaderLocation: 1, offset: 0, format: 'float32x2' },
-                { shaderLocation: 2, offset: 8, format: 'float32' },
-                { shaderLocation: 3, offset: 12, format: 'float32x3' },
+                { shaderLocation: 1, offset: 0, format: 'float32x2' }, // center
+                { shaderLocation: 2, offset: 8, format: 'float32' }, // radius
+                { shaderLocation: 3, offset: 12, format: 'float32x3' }, // col
+                { shaderLocation: 4, offset: 24, format: 'float32' }, // alpha
+                { shaderLocation: 5, offset: 28, format: 'float32' }, // soft
+                { shaderLocation: 6, offset: 32, format: 'float32' }, // screen
               ],
             },
           ],
         },
-        fragment: { module, entryPoint: 'fs_node', targets: [{ format, blend }] },
+        fragment: { module, entryPoint: 'fs_sprite', targets: [{ format, blend }] },
         primitive: { topology: 'triangle-strip' },
       });
-      const edgePipeline = device.createRenderPipeline({
+      const ringPipeline = device.createRenderPipeline({
         layout,
         vertex: {
           module,
-          entryPoint: 'vs_edge',
+          entryPoint: 'vs_ring',
           buffers: [
+            quadLayout,
             {
-              arrayStride: EDGE_STRIDE * 4,
-              stepMode: 'vertex',
+              arrayStride: RING_STRIDE * 4,
+              stepMode: 'instance',
               attributes: [
-                { shaderLocation: 0, offset: 0, format: 'float32x2' },
-                { shaderLocation: 1, offset: 8, format: 'float32x3' },
+                { shaderLocation: 1, offset: 0, format: 'float32x2' }, // center
+                { shaderLocation: 2, offset: 8, format: 'float32' }, // radius
+                { shaderLocation: 3, offset: 12, format: 'float32' }, // width
+                { shaderLocation: 4, offset: 16, format: 'float32x3' }, // col
+                { shaderLocation: 5, offset: 28, format: 'float32' }, // alpha
               ],
             },
           ],
         },
-        fragment: { module, entryPoint: 'fs_edge', targets: [{ format, blend }] },
-        primitive: { topology: 'line-list' },
+        fragment: { module, entryPoint: 'fs_ring', targets: [{ format, blend }] },
+        primitive: { topology: 'triangle-strip' },
       });
-      const err = await device.popErrorScope();
-      if (err) {
-        device.destroy(); // pipeline/shader validation failed → release + fall back to 2D
-        return null;
-      }
-
+      const ribbonPipeline = device.createRenderPipeline({
+        layout,
+        vertex: {
+          module,
+          entryPoint: 'vs_ribbon',
+          buffers: [
+            {
+              arrayStride: RIBBON_STRIDE * 4,
+              stepMode: 'vertex',
+              attributes: [
+                { shaderLocation: 0, offset: 0, format: 'float32x2' }, // pos
+                { shaderLocation: 1, offset: 8, format: 'float32x3' }, // col
+                { shaderLocation: 2, offset: 20, format: 'float32' }, // alpha
+              ],
+            },
+          ],
+        },
+        fragment: { module, entryPoint: 'fs_ribbon', targets: [{ format, blend }] },
+        primitive: { topology: 'triangle-list' },
+      });
       const camUB = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
       const camBind = device.createBindGroup({ layout: bgl, entries: [{ binding: 0, resource: { buffer: camUB } }] });
       const quad = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
       const quadVB = device.createBuffer({ size: quad.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
       device.queue.writeBuffer(quadVB, 0, quad);
-      const nodeVB = device.createBuffer({
-        size: Math.max(1, data.nodes.length) * NODE_STRIDE * 4,
-        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-      });
-      const edgeVB = device.createBuffer({
-        size: Math.max(1, data.edges.length) * 2 * EDGE_STRIDE * 4,
-        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-      });
 
-      return new WebGpuGraphRenderer(canvas, data, theme, dpr, device, ctx, nodePipeline, edgePipeline, camUB, camBind, quadVB, nodeVB, edgeVB, onLost);
+      // Per-frame scene buffers. The edge terms (sprite/ribbon) scale linearly with edge
+      // count and are NOT capped (the 2D path draws every edge too — a cap would silently
+      // drop edges). A pathologically large vault that exceeds the device buffer limit pops
+      // the error scope below → null → clean canvas-2D fallback. Only slime (faint, O(n²))
+      // is count-capped (slimeMax), since it would otherwise dominate the buffer.
+      const c = caps(data);
+      const dev = device; // narrowed const for the closure (let `device` loses narrowing)
+      const mk = (floats: number) =>
+        dev.createBuffer({
+          size: Math.max(16, floats * 4),
+          usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+        });
+      const spriteVB = mk(c.spriteCap * SPRITE_STRIDE);
+      const ringVB = mk(c.ringCap * RING_STRIDE);
+      const ribbonVB = mk(c.ribbonVertCap * RIBBON_STRIDE);
+
+      const vErr = await device.popErrorScope(); // validation (LIFO: inner scope first)
+      const oErr = await device.popErrorScope(); // out-of-memory
+      if (vErr || oErr) {
+        device.destroy(); // shader/pipeline/buffer init failed → release + fall back to 2D
+        return null;
+      }
+
+      return new WebGpuGraphRenderer(
+        canvas, data, theme, dpr, device, ctx,
+        spritePipeline, ringPipeline, ribbonPipeline,
+        camUB, camBind, quadVB, spriteVB, ringVB, ribbonVB, onLost,
+      );
     } catch {
       try {
-        device?.destroy(); // don't leak the device if we acquired it before throwing
+        device?.destroy();
       } catch {
         /* already lost */
       }
-      return null; // any init throw → caller keeps canvas-2D
+      return null;
     }
   }
 
@@ -244,7 +407,7 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
     return nodeAtWorld(this.data.nodes, wx, wy);
   }
   moveNodeToScreen(id: number, sx: number, sy: number) {
-    const n = this.data.nodes.find((m) => m.id === id);
+    const n = this.byId.get(id);
     if (!n) return;
     const [wx, wy] = screenToWorld(this.camera, sx, sy);
     n.x = wx;
@@ -259,9 +422,30 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
     const n = lookupNodeByRel(this.pathIndex, rel);
     if (n) this.pulses.set(n.id, { kind: action, t: 1 });
   }
-  // ponytail: focus dimming is a 2D-path feature today; the GPU renderer lands it with
-  // the shader-parity increment. No-op keeps the toggle from breaking on the GPU path.
-  setFocus(_path: string | null) {}
+
+  /** Local-graph focus: dim everything except `path`'s node + its 1-hop neighbours
+      (same logic + id↔index invariant as the canvas-2D path). `null`/unknown clears. */
+  setFocus(path: string | null) {
+    if (!path) {
+      this.focusSet = null;
+      return;
+    }
+    const n = lookupNodeByRel(this.pathIndex, path);
+    if (!n) {
+      this.focusSet = null;
+      return;
+    }
+    const set = new Set<number>([n.id]);
+    for (const e of this.data.edges) {
+      if (e.a === n.id) set.add(e.b);
+      else if (e.b === n.id) set.add(e.a);
+    }
+    this.focusSet = set;
+  }
+
+  private spawnParticle(e: GraphEdge) {
+    this.particles.push({ e, t: Math.random(), speed: 0.003 + Math.random() * 0.004 });
+  }
 
   start() {
     if (this.running) return;
@@ -276,11 +460,12 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
   stop() {
     this.running = false;
     cancelAnimationFrame(this.raf);
-    // Release GPU resources — GraphPane discards the instance on teardown/toggle and
-    // builds a fresh one, so a non-destroying stop would leak a device per toggle.
+    // Release GPU resources — GraphPane discards + rebuilds on teardown/toggle, so a
+    // non-destroying stop would leak a device per toggle.
     try {
-      this.nodeVB.destroy();
-      this.edgeVB.destroy();
+      this.spriteVB.destroy();
+      this.ringVB.destroy();
+      this.ribbonVB.destroy();
       this.quadVB.destroy();
       this.camUB.destroy();
       this.device.destroy();
@@ -289,12 +474,251 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
     }
   }
 
+  private n01(v: RGB): RGB01 {
+    return [v[0] / 255, v[1] / 255, v[2] / 255];
+  }
+  private clusterRgb01(c: number): RGB01 {
+    return this.n01(this.theme.clusters[c]?.rgb ?? this.theme.clusters[0].rgb);
+  }
+  private nodeFocusA(id: number): number {
+    return this.focusSet && !this.focusSet.has(id) ? 0.12 : 1;
+  }
+  private edgeFocusA(a: number, b: number): number {
+    return this.focusSet && !this.focusSet.has(a) && !this.focusSet.has(b) ? 0.08 : 1;
+  }
+
+  /** Assemble the frame's geometry into the three reusable CPU arrays, returning the
+      ordered draw ops (back→front) so the layering matches the immediate-mode 2D
+      path. Sprite/ring/ribbon sub-ranges are filled in draw order, so each op's
+      range is contiguous in its buffer. */
+  private buildScene(): { ops: DrawOp[]; spriteN: number; ringN: number; ribbonF: number } {
+    const { theme } = this;
+    const { nodes, edges } = this.data;
+    const sprite = this.spriteData;
+    const ring = this.ringData;
+    const ribbon = this.ribbonData;
+    let sN = 0;
+    let rN = 0;
+    let bF = 0; // ribbon float cursor
+    const ops: DrawOp[] = [];
+
+    const addSprite = (cx: number, cy: number, radius: number, col: RGB01, alpha: number, soft: number, screen: number) => {
+      if (sN >= this.spriteCap || alpha <= 0 || radius <= 0) return;
+      const o = sN * SPRITE_STRIDE;
+      sprite[o] = cx; sprite[o + 1] = cy; sprite[o + 2] = radius;
+      sprite[o + 3] = col[0]; sprite[o + 4] = col[1]; sprite[o + 5] = col[2];
+      sprite[o + 6] = alpha; sprite[o + 7] = soft; sprite[o + 8] = screen;
+      sN++;
+    };
+    const addRing = (cx: number, cy: number, radius: number, width: number, col: RGB01, alpha: number) => {
+      if (rN >= this.ringCap || alpha <= 0 || radius <= 0) return;
+      const o = rN * RING_STRIDE;
+      ring[o] = cx; ring[o + 1] = cy; ring[o + 2] = radius; ring[o + 3] = width;
+      ring[o + 4] = col[0]; ring[o + 5] = col[1]; ring[o + 6] = col[2]; ring[o + 7] = alpha;
+      rN++;
+    };
+    const ribbonQuad = (p0: Vec2, ctrl: Vec2, p1: Vec2, seg: number, hw: number, col: RGB01, alpha: number) => {
+      if (alpha <= 0) return;
+      bF = ribbonInto(ribbon, bF, sampleQuadratic(p0, ctrl, p1, seg), hw, col, alpha);
+    };
+    const ribbonPoly = (pts: Vec2[], hw: number, col: RGB01, alpha: number) => {
+      if (alpha <= 0) return;
+      bF = ribbonInto(ribbon, bF, pts, hw, col, alpha);
+    };
+    const layerSprite = (fill: () => void) => {
+      const start = sN;
+      fill();
+      if (sN > start) ops.push({ p: 'sprite', first: start, count: sN - start });
+    };
+    const layerRing = (fill: () => void) => {
+      const start = rN;
+      fill();
+      if (rN > start) ops.push({ p: 'ring', first: start, count: rN - start });
+    };
+    const layerRibbon = (fill: () => void) => {
+      const start = bF;
+      fill();
+      const verts = (bF - start) / RIBBON_STRIDE;
+      if (verts > 0) ops.push({ p: 'ribbon', first: start / RIBBON_STRIDE, count: verts });
+    };
+
+    const mid = (na: GraphNode, nb: GraphNode, i: number, j: number): Vec2 => ({
+      x: (na.x + nb.x) / 2 + Math.sin(i * 1.7 + j) * 18,
+      y: (na.y + nb.y) / 2 + Math.cos(j * 1.3 + i) * 14,
+    });
+    const crossEdge01 = this.n01(theme.crossEdge);
+    const core01 = this.n01(theme.nodeCoreRgb);
+    // bullseye inversion (theme-driven), mirroring the 2D path's rgbC/coreFill/accent
+    const palette = (n: GraphNode) => {
+      const cluster01 = this.clusterRgb01(n.cluster);
+      const rgbC = theme.invertNodes ? core01 : cluster01; // shell: rings / aura / dots / strokes
+      const coreFill = theme.invertNodes ? cluster01 : core01; // centre disc
+      return { rgbC, coreFill }; // accent === rgbC (clusterAccent rgb == cluster rgb)
+    };
+
+    // 1 — ambient wash (screen-space soft). ponytail: one soft sprite approximates the
+    //     2D path's 3-stop radial wash; it's a barely-there tint (alpha 0.06).
+    layerSprite(() => addSprite(this.W * 0.45, this.H * 0.45, this.W * 0.45, this.clusterRgb01(0), 0.06, 1, 1));
+
+    // 2 — slime trails (faint same-cluster proximity curves)
+    let slimeLeft = this.slimeMax;
+    layerRibbon(() => {
+      for (let i = 0; i < nodes.length && slimeLeft > 0; i++) {
+        const n = nodes[i];
+        for (let j = i + 1; j < nodes.length && slimeLeft > 0; j++) {
+          const m = nodes[j];
+          if (n.cluster !== m.cluster) continue;
+          if (Math.hypot(n.x - m.x, n.y - m.y) > 140) continue;
+          const c = mid(n, m, i, j); // j is m's absolute index — matches 2D's `i + j_slice + 1`
+          ribbonQuad({ x: n.x, y: n.y }, c, { x: m.x, y: m.y }, SEG_SLIME, 4, this.clusterRgb01(n.cluster), 0.06 * this.edgeFocusA(n.id, m.id));
+          slimeLeft--;
+        }
+      }
+    });
+
+    // 3 — cluster auras (nodes with links≥1)
+    layerSprite(() => {
+      nodes.forEach((n) => {
+        if (n.links < 1) return;
+        addSprite(n.x, n.y, 50, this.clusterRgb01(n.cluster), 0.1 * this.nodeFocusA(n.id), 1, 0);
+      });
+    });
+
+    // 4 — edges (curved base + trail overlay + arrowhead)
+    layerRibbon(() => {
+      edges.forEach((e) => {
+        const na = nodes[e.a];
+        const nb = nodes[e.b];
+        if (!na || !nb) return;
+        const fa = this.edgeFocusA(e.a, e.b);
+        const isCross = na.cluster !== nb.cluster;
+        const c = mid(na, nb, e.a, e.b);
+        const col = isCross ? crossEdge01 : this.clusterRgb01(na.cluster);
+        ribbonQuad({ x: na.x, y: na.y }, c, { x: nb.x, y: nb.y }, SEG_EDGE, (0.6 + e.trail * 1.5) / 2, col, (isCross ? 0.18 : 0.15 + e.trail * 0.2) * fa);
+        if (e.trail > 0.25)
+          ribbonQuad({ x: na.x, y: na.y }, c, { x: nb.x, y: nb.y }, SEG_EDGE, 0.15, col, (isCross ? 0.3 : e.trail * 0.35) * fa);
+        if (e.trail > 0.15) {
+          const t = 0.88;
+          const px = (1 - t) * (1 - t) * na.x + 2 * (1 - t) * t * c.x + t * t * nb.x;
+          const py = (1 - t) * (1 - t) * na.y + 2 * (1 - t) * t * c.y + t * t * nb.y;
+          const ang = Math.atan2(nb.y - py, nb.x - px);
+          ribbonPoly(
+            [
+              { x: nb.x - Math.cos(ang - 0.45) * 6, y: nb.y - Math.sin(ang - 0.45) * 6 },
+              { x: nb.x, y: nb.y },
+              { x: nb.x - Math.cos(ang + 0.45) * 6, y: nb.y - Math.sin(ang + 0.45) * 6 },
+            ],
+            0.4,
+            col,
+            (isCross ? 0.4 : e.trail * 0.5) * fa,
+          );
+        }
+      });
+    });
+
+    // 5 — tributary particles (hard discs riding the edge beziers)
+    layerSprite(() => {
+      this.particles.forEach((p) => {
+        const na = nodes[p.e.a];
+        const nb = nodes[p.e.b];
+        if (!na || !nb) return;
+        if (Math.hypot(na.x - nb.x, na.y - nb.y) > 160) return;
+        const c = mid(na, nb, p.e.a, p.e.b);
+        const t = p.t;
+        const x = (1 - t) * (1 - t) * na.x + 2 * (1 - t) * t * c.x + t * t * nb.x;
+        const y = (1 - t) * (1 - t) * na.y + 2 * (1 - t) * t * c.y + t * t * nb.y;
+        const isCross = na.cluster !== nb.cluster;
+        addSprite(x, y, 1.3, isCross ? crossEdge01 : this.clusterRgb01(na.cluster), 0.8 * this.edgeFocusA(p.e.a, p.e.b), 0, 0);
+      });
+    });
+
+    // 6 — nodes (rings behind → auras → cores+highlights → accent strokes → orbit dots).
+    //     ponytail: batched per-pipeline within the node phase (not per-node) — identical
+    //     for a non-overlapping graph (collision repulsion keeps minD spacing).
+    const pulseOf = (n: GraphNode) => Math.sin(n.phase) * 0.5 + 0.5;
+    layerRing(() => {
+      nodes.forEach((n) => {
+        const fa = this.nodeFocusA(n.id);
+        const pulse = pulseOf(n);
+        const { rgbC } = palette(n);
+        if (n.hub) {
+          for (let r = 3; r >= 1; r--) addRing(n.x, n.y, n.r * (1.4 + r * 0.65) + pulse * 4, 0.8, rgbC, (0.03 + 0.03 * r) * fa);
+        } else if (n.links >= 2) {
+          addRing(n.x, n.y, n.r + 2 + pulse * 2.5, 0.8, rgbC, (0.12 + pulse * 0.12) * fa);
+        }
+      });
+    });
+    layerSprite(() => {
+      nodes.forEach((n) => {
+        const fa = this.nodeFocusA(n.id);
+        const pulse = pulseOf(n);
+        const { rgbC } = palette(n);
+        if (n.hub) addSprite(n.x, n.y, n.r * 2.8 + pulse * 3, rgbC, 0.45 * fa, 1, 0);
+        else if (n.links >= 2) addSprite(n.x, n.y, n.r * 1.8, rgbC, 0.22 * fa, 1, 0);
+      });
+    });
+    layerSprite(() => {
+      nodes.forEach((n) => {
+        const fa = this.nodeFocusA(n.id);
+        const pulse = pulseOf(n);
+        const { rgbC, coreFill } = palette(n);
+        addSprite(n.x, n.y, n.r, coreFill, fa, 0, 0);
+        if (n.hub) addSprite(n.x, n.y, n.r * 0.38, rgbC, 0.93 * fa, 0, 0);
+        else if (n.links >= 2) addSprite(n.x - n.r * 0.25, n.y - n.r * 0.25, n.r * 0.28, rgbC, (0.4 + pulse * 0.5) * fa, 0, 0);
+      });
+    });
+    layerRing(() => {
+      nodes.forEach((n) => {
+        const fa = this.nodeFocusA(n.id);
+        const { rgbC } = palette(n);
+        if (n.hub) addRing(n.x, n.y, n.r, 1.5, rgbC, fa);
+        else if (n.links >= 2) addRing(n.x, n.y, n.r, 1, rgbC, 0.8 * fa);
+        else addRing(n.x, n.y, n.r, 0.5, rgbC, 0.2 * fa);
+      });
+    });
+    layerSprite(() => {
+      nodes.forEach((n) => {
+        if (!n.hub) return;
+        const fa = this.nodeFocusA(n.id);
+        const pulse = pulseOf(n);
+        const { rgbC } = palette(n);
+        const count = Math.min(n.links, 5);
+        for (let i = 0; i < count; i++) {
+          const a = (i / 5) * Math.PI * 2 + this.tick * 0.015;
+          const dr = n.r + 9 + pulse * 2;
+          addSprite(n.x + Math.cos(a) * dr, n.y + Math.sin(a) * dr, 1.4, rgbC, 0.6 * fa, 0, 0);
+        }
+      });
+    });
+
+    // 7 — CC activity flares (overlay, full strength — ignore focus dimming, like 2D)
+    const read01 = this.n01(theme.activityRead);
+    const modify01 = this.n01(theme.activityModify);
+    layerSprite(() => {
+      this.pulses.forEach((p, id) => {
+        const n = this.byId.get(id);
+        if (!n) return;
+        addSprite(n.x, n.y, n.r + 6 + (1 - p.t) * 22, p.kind === 'read' ? read01 : modify01, 0.5 * p.t, 1, 0);
+      });
+    });
+    layerRing(() => {
+      this.pulses.forEach((p, id) => {
+        const n = this.byId.get(id);
+        if (!n) return;
+        addRing(n.x, n.y, n.r + 6 + (1 - p.t) * 22, 2, p.kind === 'read' ? read01 : modify01, 0.7 * p.t);
+      });
+    });
+
+    return { ops, spriteN: sN, ringN: rN, ribbonF: bF };
+  }
+
   private frame() {
-    const { data, theme } = this;
+    const { data } = this;
     // shared layout + drag pin (identical to the 2D path)
     const drag = this.draggingId !== null ? data.nodes.find((n) => n.id === this.draggingId) : undefined;
     const px = drag?.x;
     const py = drag?.y;
+    this.tick++;
     stepSimulation(data.nodes, this.W, this.H);
     if (drag && px !== undefined && py !== undefined) {
       drag.x = px;
@@ -302,71 +726,36 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
       drag.vx = 0;
       drag.vy = 0;
     }
+    // tributary particles: advance, respawn at the ends (same as the 2D update)
+    this.particles = this.particles.filter((p) => {
+      p.t += p.speed * p.e.flow;
+      if (p.t > 1 || p.t < 0) {
+        this.spawnParticle(p.e);
+        return false;
+      }
+      return true;
+    });
     this.pulses.forEach((p, id) => {
       p.t *= 0.95;
       if (p.t < 0.02) this.pulses.delete(id);
     });
 
-    const clusterRgb = (c: number) => theme.clusters[c]?.rgb ?? theme.clusters[0].rgb;
     // ALL GPU work is guarded: an external device loss surfaces here as a throw
     // (e.g. getCurrentTexture) → stop + onLost → GraphPane rebuilds on canvas-2D.
     try {
-      // camera uniform
-      const cam = this.camera;
       this.device.queue.writeBuffer(
         this.camUB,
         0,
-        new Float32Array([cam.zoom, cam.tx, cam.ty, 0, this.W, this.H, 0, 0]),
+        new Float32Array([this.camera.zoom, this.camera.tx, this.camera.ty, 0, this.W, this.H, 0, 0]),
       );
 
-      // node instances (cluster colour, boosted toward the activity colour while pulsing)
-      const nd = this.nodeData;
-      data.nodes.forEach((n, i) => {
-        const p = this.pulses.get(n.id);
-        const base = clusterRgb(n.cluster);
-        let [r, g, b] = base;
-        let rad = Math.max(2, n.r);
-        if (p) {
-          const acc = p.kind === 'read' ? theme.activityRead : theme.activityModify;
-          const t = p.t;
-          r = base[0] + (acc[0] - base[0]) * t;
-          g = base[1] + (acc[1] - base[1]) * t;
-          b = base[2] + (acc[2] - base[2]) * t;
-          rad *= 1 + 0.6 * t;
-        }
-        const o = i * NODE_STRIDE;
-        nd[o] = n.x;
-        nd[o + 1] = n.y;
-        nd[o + 2] = rad;
-        nd[o + 3] = r / 255;
-        nd[o + 4] = g / 255;
-        nd[o + 5] = b / 255;
-      });
-      if (nd.length) this.device.queue.writeBuffer(this.nodeVB, 0, nd);
+      const { ops, spriteN, ringN, ribbonF } = this.buildScene();
+      if (spriteN) this.device.queue.writeBuffer(this.spriteVB, 0, this.spriteData, 0, spriteN * SPRITE_STRIDE);
+      if (ringN) this.device.queue.writeBuffer(this.ringVB, 0, this.ringData, 0, ringN * RING_STRIDE);
+      if (ribbonF) this.device.queue.writeBuffer(this.ribbonVB, 0, this.ribbonData, 0, ribbonF);
 
-      // edges — compact only valid endpoints so a missing node never draws a stale
-      // origin-line (the 2D path skips such edges; match that).
-      const ed = this.edgeData;
-      let edgeVerts = 0;
-      for (const e of data.edges) {
-        const a = data.nodes[e.a];
-        const b = data.nodes[e.b];
-        if (!a || !b) continue;
-        const cross = a.cluster !== b.cluster;
-        const col = cross ? theme.crossEdge : clusterRgb(a.cluster);
-        const cr = col[0] / 255;
-        const cg = col[1] / 255;
-        const cb = col[2] / 255;
-        const o = edgeVerts * EDGE_STRIDE;
-        ed[o] = a.x; ed[o + 1] = a.y; ed[o + 2] = cr; ed[o + 3] = cg; ed[o + 4] = cb;
-        ed[o + 5] = b.x; ed[o + 6] = b.y; ed[o + 7] = cr; ed[o + 8] = cg; ed[o + 9] = cb;
-        edgeVerts += 2;
-      }
-      if (edgeVerts) this.device.queue.writeBuffer(this.edgeVB, 0, ed.subarray(0, edgeVerts * EDGE_STRIDE));
-
-      // encode
       const view = this.ctx.getCurrentTexture().createView();
-      const bg = theme.bgRgb;
+      const bg = this.theme.bgRgb;
       const a = GRAPH_BG_ALPHA;
       const enc = this.device.createCommandEncoder();
       const pass = enc.beginRenderPass({
@@ -380,23 +769,28 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
         ],
       });
       pass.setBindGroup(0, this.camBind);
-      if (edgeVerts) {
-        pass.setPipeline(this.edgePipeline);
-        pass.setVertexBuffer(0, this.edgeVB);
-        pass.draw(edgeVerts);
-      }
-      if (data.nodes.length) {
-        pass.setPipeline(this.nodePipeline);
-        pass.setVertexBuffer(0, this.quadVB);
-        pass.setVertexBuffer(1, this.nodeVB);
-        pass.draw(4, data.nodes.length);
+      for (const op of ops) {
+        if (op.p === 'sprite') {
+          pass.setPipeline(this.spritePipeline);
+          pass.setVertexBuffer(0, this.quadVB);
+          pass.setVertexBuffer(1, this.spriteVB);
+          pass.draw(4, op.count, 0, op.first);
+        } else if (op.p === 'ring') {
+          pass.setPipeline(this.ringPipeline);
+          pass.setVertexBuffer(0, this.quadVB);
+          pass.setVertexBuffer(1, this.ringVB);
+          pass.draw(4, op.count, 0, op.first);
+        } else {
+          pass.setPipeline(this.ribbonPipeline);
+          pass.setVertexBuffer(0, this.ribbonVB);
+          pass.draw(op.count, 1, op.first, 0);
+        }
       }
       pass.end();
       this.device.queue.submit([enc.finish()]);
     } catch {
-      // context lost / GPU error mid-frame → tear down + ask the caller to fall back.
       this.stop();
-      this.onLost?.();
+      this.fireLost();
     }
   }
 }

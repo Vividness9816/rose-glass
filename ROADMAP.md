@@ -11,7 +11,7 @@ with a riskiest-premise spike on a tiny scope before its build.
 | 4(2D) | `phase4-graph` | Canvas-2D living graph ported, de-hardcoded, on mock data (the §20 2D-fallback leg) | ✅ done (this session) |
 | 2 | `phase2-indexer` | Vault open + watcher + indexer + SQLite schema (§8); incremental + full-rebuild | ✅ done (A3 proven; review pass pending) |
 | 3 | `phase3-editor` | CodeMirror 6 editor pane (mockup parity), save path, live links/backlinks | ✅ done (reviewed) |
-| 4 | `phase4-webgpu` | WebGPU renderer at fixed 4K + drag node/cluster + zoom/pan + click-open; **spike: React19×design-libs + WebGPU 4K probe + fallback** | 🟢 interaction + airtight fallback DONE (3-lens reviewed); **WebGPU render + zoom GPU-VERIFIED on the RTX 5090** (`nvidia/blackwell`, `docs/proof/phase4-webgpu-*.png`). drag/pan/click + literal-4K confirmed. **ACTIVE NEXT — GPU-visual parity:** grow the WGSL to match the 2D look (node auras/glow, tributary particles, curved edges + arrowheads, hub rings) + port the **Focus dimming** and the **theme node-inversion** to the GPU path (both 2D-only today) (`phase4-graph`, `phase4-webgpu`) |
+| 4 | `phase4-webgpu` | WebGPU renderer at fixed 4K + drag node/cluster + zoom/pan + click-open; **spike: React19×design-libs + WebGPU 4K probe + fallback** | ✅ interaction + airtight fallback + **GPU-visual parity** DONE (3-lens reviewed twice). WebGPU render + zoom GPU-VERIFIED on the RTX 5090 (`nvidia/blackwell`). **GPU now matches the 2D look** — 3 instanced WGSL pipelines (sprite/ring/ribbon) reproduce node auras/glow, tributary particles, curved edges + arrowheads + trails, hub rings + orbiting dots; **Focus dimming + theme bullseye inversion ported** off the 2D-only path; only hub text labels stay 2D (glyph-atlas ceiling). Verified dark+light on the 5090 (`docs/proof/phase4-parity-*.png` via `phase4-parity-verify.cjs`; toggle stays GPU, 0 errors). Residual: literal-4K res + the user feel/taste eyeball (`phase4-graph`, `phase4-webgpu`) |
 | 5 | `phase5-search` | FTS5 search + ⌘K command palette (mockup glass) | ✅ done |
 | 6 | `phase6-glass` | Theme-aware **r3f-v9** living backdrop (shadergradient dead on R19) + **eamonliu** liquid-glass lens (dashersw incompatible w/ WebGL) + backdrop-filter chrome; light-theme **tuned**; dual-theme diffs | ✅ done (visual taste pending user eyeball) |
 | 7 | `phase7-terminal` | xterm.js + portable-pty; embedded shell at cwd=vault (runs Claude Code) | ✅ done (cargo 26/26, user-confirmed live) |
@@ -27,7 +27,9 @@ with a riskiest-premise spike on a tiny scope before its build.
 - Every `proven` row in STATUS.md cites a commit scope + a re-runnable artifact. No prose "verified."
 
 ## Active frontier (post round-2 feedback, 2026-06-17 PM)
-Primary: **GPU shader parity** (Phase 4 row above). Then the round-2 fixes/features logged in
-PROGRESS.md "Round-2 live feedback": Focus-dim bug, palette-result-click bug, Share-clipboard
-(Tauri clipboard plugin), window controls/fullscreen (Tauri window perms), terminal rename +
-Claude-attention indicator, Properties disk size. Phase 12 (§20 v1.0 gate) closes after these.
+~~Primary: GPU shader parity~~ ✅ **DONE** (Phase 4 row above — GPU-visual parity + Focus + inversion,
+3-lens reviewed, 5090-verified dark+light). Next: the round-2 fixes/features logged in PROGRESS.md
+"Round-2 live feedback" — Focus-dim bug (2D path; the GPU no-op is now fixed), palette-result-click
+bug, Share-clipboard (Tauri clipboard plugin), window controls/fullscreen (Tauri window perms),
+terminal rename + Claude-attention indicator, Properties disk size. Phase 12 (§20 v1.0 gate) closes
+after these.
