@@ -55,6 +55,12 @@ export interface OpenVaultResult {
   note_count: number;
   rebuilt: boolean;
 }
+/** v2.0 drag-drop result: vault-relative path to open + whether it's an indexable note
+ *  (md/txt, also a graph node) or a viewer-only binary (pdf/docx). */
+export interface IngestResult {
+  rel: string;
+  kind: 'note' | 'binary';
+}
 export interface GraphNodeMeta {
   path: string;
   title: string;
@@ -99,6 +105,11 @@ export const semanticSearch = (query: string, k: number) =>
 /** v2.0: reset the cached embedding model so the next recompute/search re-attempts the
  *  ~90MB fetch — the Retry affordance after a failed (offline/interrupted) model load. */
 export const retryEmbeddingModel = () => invoke<void>('retry_embedding_model');
+
+/** v2.0: ingest a drag-dropped absolute path. Copies into <vault>/inbox/ if it's outside
+ *  the vault, indexes md/txt (orphan node appears), and returns what + how to open it. */
+export const ingestDroppedFile = (path: string) =>
+  invoke<IngestResult>('ingest_dropped_file', { path });
 
 export const readNoteFile = (path: string) => invoke<string>('read_note_file', { path });
 export const saveNoteFile = (path: string, content: string) =>

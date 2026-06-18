@@ -21,7 +21,12 @@ use tauri::{AppHandle, Emitter, Manager, State};
 /// classified lexically, not FS-resolved — display-only, `fs_safe` guards real ops
 /// (ADR-20260618-rose-glass-v2-architecture).
 fn canonical_root(p: &Path) -> PathBuf {
-    let c = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    strip_verbatim(std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf()))
+}
+
+/// Strip the Windows `\\?\` verbatim prefix so canonical paths compare against the
+/// un-prefixed forms the dialog / drag-drop / CC report. No-op on non-Windows or UNC.
+fn strip_verbatim(c: PathBuf) -> PathBuf {
     if cfg!(windows) {
         if let Some(s) = c.to_str() {
             if let Some(stripped) = s.strip_prefix(r"\\?\") {
@@ -501,9 +506,204 @@ pub async fn activity_hook_disarm() -> Result<String, IpcError> {
     }
 }
 
+/// Drag-drop result: the vault-relative path to open + whether it's an indexable note
+/// (md/txt → also a graph node) or a viewer-only binary (pdf/docx).
+#[derive(Serialize, Clone, Copy, PartialEq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum IngestKind {
+    Note,
+    Binary,
+}
+
+#[derive(Serialize)]
+pub struct IngestResult {
+    pub rel: String,
+    pub kind: IngestKind,
+}
+
+/// Allowed drop types. md/txt become notes (+graph nodes); pdf/docx are viewer-only
+/// (binaries aren't notes — ADR-20260617). Anything else is rejected.
+fn ingest_kind(ext: &str) -> Option<IngestKind> {
+    match ext.to_ascii_lowercase().as_str() {
+        "md" | "markdown" | "txt" => Some(IngestKind::Note),
+        "pdf" | "docx" => Some(IngestKind::Binary),
+        _ => None,
+    }
+}
+
+/// Pick a non-colliding destination in `dir` for `src`'s file name, claiming it atomically
+/// with `create_new` (no check-then-copy TOCTOU): `name.md`, then `name (1).md`, … The
+/// returned path is an empty file the caller's copy then overwrites.
+fn unique_dest(dir: &Path, src: &Path) -> Result<PathBuf, String> {
+    let name = Path::new(src.file_name().ok_or("dropped path has no file name")?);
+    let stem = name.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+    let ext = name.extension().and_then(|e| e.to_str());
+    for i in 0..1000 {
+        let candidate = if i == 0 {
+            dir.join(name)
+        } else if let Some(e) = ext {
+            dir.join(format!("{stem} ({i}).{e}"))
+        } else {
+            dir.join(format!("{stem} ({i})"))
+        };
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&candidate) {
+            Ok(_) => return Ok(candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("cannot create inbox file: {e}")),
+        }
+    }
+    Err("too many name collisions in inbox/".into())
+}
+
+/// Blocking core of `ingest_dropped_file` (runs off the async runtime). Canonicalizes the
+/// source (rejecting folders / unsupported types), copies it into `<vault>/inbox/` if it's
+/// outside the vault (atomic dedupe) or uses it in place if already inside, then indexes
+/// md/txt so an orphan node appears. pdf/docx are viewer-only.
+fn ingest_blocking(
+    root: &Path,
+    db: &std::sync::Mutex<rusqlite::Connection>,
+    abs_path: &str,
+) -> Result<IngestResult, String> {
+    let src = strip_verbatim(
+        std::fs::canonicalize(abs_path).map_err(|e| format!("cannot resolve dropped file: {e}"))?,
+    );
+    if !std::fs::metadata(&src).map_err(|e| e.to_string())?.is_file() {
+        return Err("only files can be dropped, not folders".into());
+    }
+    let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let kind = ingest_kind(ext).ok_or_else(|| format!("unsupported file type: .{ext}"))?;
+
+    // Already inside the vault (both canonical, UNC-stripped) → use in place; outside →
+    // copy into <vault>/inbox/ with an atomic, deduped name (keeps the vault-relative model).
+    let rel = match pipeline::normalize_rel(root, &src).filter(|r| !r.is_empty()) {
+        Some(rel) => rel,
+        None => {
+            let inbox = root.join("inbox");
+            std::fs::create_dir_all(&inbox).map_err(|e| e.to_string())?;
+            let dest = unique_dest(&inbox, &src)?;
+            std::fs::copy(&src, &dest).map_err(|e| format!("copy into inbox failed: {e}"))?;
+            pipeline::normalize_rel(root, &dest).ok_or("copied file escaped the vault")?
+        }
+    };
+
+    if kind == IngestKind::Note {
+        let mut conn = db.lock().unwrap_or_else(|e| e.into_inner());
+        pipeline::incremental(&mut conn, root, &rel).map_err(|e| e.to_string())?;
+    }
+    Ok(IngestResult { rel, kind })
+}
+
+/// v2.0: ingest a drag-dropped file. md/txt → copied into the vault (if outside) + indexed
+/// (orphan graph node appears via the index:note refetch) + opened; pdf/docx → opened in
+/// the viewer (not a node). The fs copy + index run off the async runtime so a large file
+/// doesn't stall it.
+#[tauri::command]
+pub async fn ingest_dropped_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<IngestResult, IpcError> {
+    let root = lock(&state.vault_root)
+        .clone()
+        .ok_or_else(|| IpcError("no vault open".into()))?;
+    let db = state.db.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || ingest_blocking(&root, &db, &path))
+        .await
+        .map_err(|e| IpcError(e.to_string()))?
+        .map_err(IpcError)?;
+    // A new note → tell the graph so its orphan node appears (Shell refetches on index:note).
+    if result.kind == IngestKind::Note {
+        let _ = app.emit("index:note", serde_json::json!({ "path": result.rel, "op": "upsert" }));
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ingest_kind_routes_extensions() {
+        assert_eq!(ingest_kind("md"), Some(IngestKind::Note));
+        assert_eq!(ingest_kind("MARKDOWN"), Some(IngestKind::Note));
+        assert_eq!(ingest_kind("txt"), Some(IngestKind::Note));
+        assert_eq!(ingest_kind("pdf"), Some(IngestKind::Binary));
+        assert_eq!(ingest_kind("docx"), Some(IngestKind::Binary));
+        assert_eq!(ingest_kind("png"), None);
+        assert_eq!(ingest_kind(""), None);
+    }
+
+    fn mem_db() -> std::sync::Mutex<rusqlite::Connection> {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        std::sync::Mutex::new(conn)
+    }
+
+    #[test]
+    fn ingest_outside_note_copies_into_inbox_and_indexes() {
+        let vault = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = canonical_root(vault.path());
+        let src = outside.path().join("dropped.md");
+        std::fs::write(&src, b"# Dropped\n[[nowhere]]").unwrap();
+
+        let db = mem_db();
+        let r = ingest_blocking(&root, &db, src.to_str().unwrap()).unwrap();
+        assert_eq!(r.kind, IngestKind::Note);
+        assert_eq!(r.rel, "inbox/dropped.md");
+        assert!(root.join("inbox/dropped.md").is_file(), "copied into inbox");
+        let n: i64 = db
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM notes WHERE path='inbox/dropped.md'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1, "the dropped note is indexed (orphan node)");
+    }
+
+    #[test]
+    fn ingest_dedupes_name_collision_atomically() {
+        let vault = tempfile::tempdir().unwrap();
+        let root = canonical_root(vault.path());
+        std::fs::create_dir_all(root.join("inbox")).unwrap();
+        std::fs::write(root.join("inbox/dropped.md"), b"existing").unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let src = outside.path().join("dropped.md");
+        std::fs::write(&src, b"new").unwrap();
+
+        let db = mem_db();
+        let r = ingest_blocking(&root, &db, src.to_str().unwrap()).unwrap();
+        assert_eq!(r.rel, "inbox/dropped (1).md", "collision → deduped name");
+        assert_eq!(std::fs::read(root.join("inbox/dropped.md")).unwrap(), b"existing", "original untouched");
+    }
+
+    #[test]
+    fn ingest_binary_opens_viewer_without_indexing() {
+        let vault = tempfile::tempdir().unwrap();
+        let root = canonical_root(vault.path());
+        let outside = tempfile::tempdir().unwrap();
+        let src = outside.path().join("paper.pdf");
+        std::fs::write(&src, b"%PDF-1.7").unwrap();
+
+        let db = mem_db();
+        let r = ingest_blocking(&root, &db, src.to_str().unwrap()).unwrap();
+        assert_eq!(r.kind, IngestKind::Binary);
+        assert_eq!(r.rel, "inbox/paper.pdf");
+        let n: i64 = db.lock().unwrap().query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0, "a binary is not indexed as a note");
+    }
+
+    #[test]
+    fn ingest_rejects_directory_and_unknown_ext() {
+        let vault = tempfile::tempdir().unwrap();
+        let root = canonical_root(vault.path());
+        let db = mem_db();
+        let dir = tempfile::tempdir().unwrap();
+        assert!(ingest_blocking(&root, &db, dir.path().to_str().unwrap()).is_err(), "folder rejected");
+        let outside = tempfile::tempdir().unwrap();
+        let png = outside.path().join("x.png");
+        std::fs::write(&png, b"\x89PNG").unwrap();
+        assert!(ingest_blocking(&root, &db, png.to_str().unwrap()).is_err(), "unknown ext rejected");
+    }
 
     #[test]
     fn canonical_root_strips_verbatim_prefix() {

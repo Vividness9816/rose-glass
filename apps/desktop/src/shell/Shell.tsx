@@ -43,6 +43,7 @@ import {
   activityStop,
   getBacklinks,
   getGraphPayload,
+  ingestDroppedFile,
   getNote,
   inTauri,
   onActivityAnomaly,
@@ -492,6 +493,41 @@ export function Shell() {
       unRebuilt?.();
     };
   }, [refreshGraph]);
+
+  // v2.0: drag a file onto the window → ingest it (copy into inbox/ if outside the vault,
+  // index md/txt so an orphan node appears) and open it in the right pane. Uses Tauri's
+  // native webview drag-drop (real absolute paths; HTML5 dnd can't provide them).
+  useEffect(() => {
+    if (!inTauri()) return;
+    let active = true;
+    let un: (() => void) | undefined;
+    void (async () => {
+      const { getCurrentWebview } = await import('@tauri-apps/api/webview');
+      const u = await getCurrentWebview().onDragDropEvent(async (event) => {
+        if (event.payload.type !== 'drop') return;
+        let opened = false;
+        for (const p of event.payload.paths) {
+          try {
+            const r = await ingestDroppedFile(p);
+            // Open only the first successfully-ingested file; the rest still get indexed.
+            if (!opened) {
+              if (r.kind === 'note') await openNote(r.rel);
+              else openBinary(r.rel);
+              opened = true;
+            }
+          } catch (e) {
+            console.error('drop ingest failed for', p, e); // ponytail: surface as a toast later
+          }
+        }
+      });
+      if (active) un = u;
+      else u();
+    })();
+    return () => {
+      active = false;
+      un?.();
+    };
+  }, [openNote, openBinary]);
 
   // Persist the active rail view so the app resumes on the same pane.
   useEffect(() => {
