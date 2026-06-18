@@ -404,6 +404,16 @@ pub fn embedding_freshness(conn: &Connection, model: &str) -> rusqlite::Result<(
     Ok((emb, notes))
 }
 
+/// v2.0 model-version guard: drop embedding rows from ANY model other than the current
+/// one. Called at vault-open so swapping `MODEL_NAME` (a rebuilt binary) can't leave
+/// stale-meaning vectors in the table. The model column already filters reads, so this is
+/// belt-and-suspenders + space reclaim — NOT an automatic re-embed (the freshness check
+/// then prompts a manual recompute; no startup storm — ADR-20260618-rose-glass-v2).
+/// Returns the number of rows purged.
+pub fn purge_stale_embeddings(conn: &Connection, model: &str) -> rusqlite::Result<usize> {
+    conn.execute("DELETE FROM embeddings WHERE model != ?1", params![model])
+}
+
 /// Titles for a set of result paths, in the order given (a note path always has a row in
 /// `notes`; falls back to the path if somehow missing). Used to enrich KNN hits — only
 /// the top-k, so the per-row lookup is cheap.
@@ -490,6 +500,23 @@ mod semantic_tests {
             params![path, vec_to_blob(vec), model],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn purge_stale_embeddings_drops_other_models_only() {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        seed(&conn, "cur.md", "Cur", &[1.0, 0.0], MODEL_NAME);
+        seed(&conn, "old.md", "Old", &[9.0; 768], "some-old-model");
+
+        let purged = purge_stale_embeddings(&conn, MODEL_NAME).unwrap();
+        assert_eq!(purged, 1, "only the wrong-model row is dropped");
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(*) FROM embeddings", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 1, "the current-model row survives");
+        // idempotent: a second purge with no stale rows drops nothing
+        assert_eq!(purge_stale_embeddings(&conn, MODEL_NAME).unwrap(), 0);
     }
 
     #[test]

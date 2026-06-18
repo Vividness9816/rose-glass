@@ -45,6 +45,10 @@ export interface SemanticResult {
   /** true ⇒ some notes are unembedded since the last recompute; hits rank a partial corpus. */
   stale: boolean;
   hits: SemanticHit[];
+  /** v2.0 telemetry: KNN scan time in ms. */
+  elapsed_ms: number;
+  /** v2.0 telemetry: number of embedded notes scanned. */
+  corpus_size: number;
 }
 export interface OpenVaultResult {
   vault: string;
@@ -91,6 +95,10 @@ export const relatedNotes = (path: string, k: number) =>
  *  slow; cache it in AppState before wiring debounced search). */
 export const semanticSearch = (query: string, k: number) =>
   invoke<SemanticResult>('semantic_search', { query, k });
+
+/** v2.0: reset the cached embedding model so the next recompute/search re-attempts the
+ *  ~90MB fetch — the Retry affordance after a failed (offline/interrupted) model load. */
+export const retryEmbeddingModel = () => invoke<void>('retry_embedding_model');
 
 export const readNoteFile = (path: string) => invoke<string>('read_note_file', { path });
 export const saveNoteFile = (path: string, content: string) =>

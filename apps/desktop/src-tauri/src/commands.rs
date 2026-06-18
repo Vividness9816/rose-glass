@@ -79,6 +79,10 @@ pub async fn open_vault(
 
     let mut conn = db::open_db(&db_path)?;
     db::migrate(&conn)?;
+    // v2.0 model-version guard: drop embeddings from any other model before they could be
+    // miscounted as fresh. Reads already filter by model; this reclaims space + makes the
+    // freshness check honest. No re-embed here — the user runs Clusters when they want it.
+    let _ = queries::purge_stale_embeddings(&conn, crate::embed::MODEL_NAME)?;
     let count = pipeline::full_rebuild(&mut conn, &root)?;
 
     // Stop the old watcher BEFORE swapping/spawning so there's never a transient
@@ -283,8 +287,12 @@ pub async fn recompute_clusters(
     // Embed without the DB lock (model load + inference is slow). Borrow the texts (no
     // second copy of the corpus); rows stays alive for the zip below.
     let texts: Vec<&str> = rows.iter().map(|(_, t)| t.as_str()).collect();
-    let mut model = crate::embed::new_model(&cache).map_err(IpcError)?;
-    let vectors = crate::embed::embed_texts(&mut model, &texts).map_err(IpcError)?;
+    // Embed via the AppState model cache: loads the ~90MB model once, reused across calls,
+    // and a failed load is remembered (Retry via retry_embedding_model). No cache wipe.
+    let vectors = crate::embed::with_model(&state.model, &cache, |m| {
+        crate::embed::embed_texts(m, &texts)
+    })
+    .map_err(IpcError)?;
 
     let items: Vec<(String, Vec<f32>)> = rows.into_iter().map(|(p, _)| p).zip(vectors).collect();
     let now = std::time::SystemTime::now()
@@ -317,6 +325,11 @@ pub struct SemanticResult {
     pub ready: bool,
     pub stale: bool,
     pub hits: Vec<SemanticHit>,
+    /// v2.0 telemetry (ADR-20260618-v2): KNN scan time + corpus size, returned in the
+    /// response (surfaced in the UI) instead of logged to a swallowed stderr — the
+    /// "measure before optimizing" signal for the deferred sqlite-vec decision.
+    pub elapsed_ms: u64,
+    pub corpus_size: usize,
 }
 
 /// Phase 13: notes most semantically similar to `path`, by cosine over the stored
@@ -333,17 +346,25 @@ pub async fn related_notes(
     let db = lock(&state.db);
     let (emb, notes) = queries::embedding_freshness(&db, crate::embed::MODEL_NAME)?;
     if emb == 0 {
-        return Ok(SemanticResult { ready: false, stale: false, hits: vec![] });
+        return Ok(SemanticResult { ready: false, stale: false, hits: vec![], elapsed_ms: 0, corpus_size: 0 });
     }
     let corpus = queries::read_embeddings(&db, crate::embed::MODEL_NAME)?;
     let stale = emb < notes;
     // The open note may not be embedded yet (added since the last recompute): no query
     // vector ⇒ no neighbours, but report stale so the UI can prompt a recompute.
     let Some((_, query_vec)) = corpus.iter().find(|(p, _)| p == &path).cloned() else {
-        return Ok(SemanticResult { ready: true, stale: true, hits: vec![] });
+        return Ok(SemanticResult { ready: true, stale: true, hits: vec![], elapsed_ms: 0, corpus_size: corpus.len() });
     };
+    let t0 = std::time::Instant::now();
     let scored = crate::knn::knn(&query_vec, &corpus, k, Some(&path));
-    Ok(SemanticResult { ready: true, stale, hits: queries::titles_for(&db, scored) })
+    let elapsed_ms = t0.elapsed().as_millis() as u64;
+    Ok(SemanticResult {
+        ready: true,
+        stale,
+        hits: queries::titles_for(&db, scored),
+        elapsed_ms,
+        corpus_size: corpus.len(),
+    })
 }
 
 /// Phase 13: free-text semantic search — embed `query` (local ONNX) and rank the stored
@@ -372,23 +393,40 @@ pub async fn semantic_search(
         let db = lock(&state.db);
         let (emb, notes) = queries::embedding_freshness(&db, crate::embed::MODEL_NAME)?;
         if emb == 0 {
-            return Ok(SemanticResult { ready: false, stale: false, hits: vec![] });
+            return Ok(SemanticResult { ready: false, stale: false, hits: vec![], elapsed_ms: 0, corpus_size: 0 });
         }
         (emb, notes, queries::read_embeddings(&db, crate::embed::MODEL_NAME)?)
     };
 
     let cache = app.path().app_cache_dir()?.join("models");
     std::fs::create_dir_all(&cache)?;
-    let mut model = crate::embed::new_model(&cache).map_err(IpcError)?;
-    let query_vec = crate::embed::embed_texts(&mut model, &[query])
-        .map_err(IpcError)?
-        .into_iter()
-        .next()
-        .unwrap_or_default();
+    let query_vec = crate::embed::with_model(&state.model, &cache, |m| {
+        crate::embed::embed_texts(m, std::slice::from_ref(&query))
+    })
+    .map_err(IpcError)?
+    .into_iter()
+    .next()
+    .unwrap_or_default();
 
+    let t0 = std::time::Instant::now();
     let scored = crate::knn::knn(&query_vec, &corpus, k, None);
+    let elapsed_ms = t0.elapsed().as_millis() as u64;
     let db = lock(&state.db);
-    Ok(SemanticResult { ready: true, stale: emb < notes, hits: queries::titles_for(&db, scored) })
+    Ok(SemanticResult {
+        ready: true,
+        stale: emb < notes,
+        hits: queries::titles_for(&db, scored),
+        elapsed_ms,
+        corpus_size: corpus.len(),
+    })
+}
+
+/// v2.0: reset the cached embedding model so the next recompute/search rebuilds it — the
+/// "Retry" affordance after a failed model fetch (offline / interrupted ~90MB download).
+#[tauri::command]
+pub async fn retry_embedding_model(state: State<'_, AppState>) -> Result<(), IpcError> {
+    crate::embed::reset_model(&state.model);
+    Ok(())
 }
 
 /// Phase 8: start the read-only CC activity tail (ADR-20260617 M1 — transcript-tail

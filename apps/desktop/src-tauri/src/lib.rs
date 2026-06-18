@@ -46,6 +46,7 @@ pub fn run() {
             commands::recompute_clusters,
             commands::related_notes,
             commands::semantic_search,
+            commands::retry_embedding_model,
             commands::activity_start,
             commands::activity_stop,
             commands::activity_hook_plan,

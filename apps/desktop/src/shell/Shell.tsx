@@ -53,6 +53,7 @@ import {
   openVault,
   readNoteFile,
   recomputeClusters,
+  retryEmbeddingModel,
   reindex,
   resolveLink,
   saveNoteFile,
@@ -86,6 +87,7 @@ export function Shell() {
   const activeTermRef = useRef(activeTerm);
   activeTermRef.current = activeTerm;
   const [clustering, setClustering] = useState(false); // Phase 11 embed+cluster in progress
+  const [clusterError, setClusterError] = useState<string | null>(null); // v2.0 model-load failure → Retry
   const [reindexing, setReindexing] = useState(false); // Settings: manual index rebuild in progress
   const [railView, setRailView] = useState('graph'); // which IconRail view; 'activity' swaps the right pane
   const [activity, setActivity] = useState<ActivityState>(emptyActivity); // Phase 8 ephemeral ring
@@ -207,14 +209,28 @@ export function Shell() {
   const onCluster = useCallback(async () => {
     if (clustering || !inTauri()) return;
     setClustering(true);
+    setClusterError(null);
     try {
       await recomputeClusters();
     } catch (e) {
+      // v2.0: a failed ~90MB model fetch is remembered backend-side; surface a Retry
+      // instead of only logging it (the Retry resets the cache then re-attempts).
       console.error('recompute clusters failed:', e);
+      setClusterError(String(e));
     } finally {
       setClustering(false);
     }
   }, [clustering]);
+
+  // v2.0 Retry affordance: clear the remembered model-load failure, then re-cluster.
+  const onRetryCluster = useCallback(async () => {
+    try {
+      await retryEmbeddingModel();
+    } catch {
+      /* reset is best-effort; the re-cluster below reports the real outcome */
+    }
+    await onCluster();
+  }, [onCluster]);
 
   // ⌘K / Ctrl+K opens the palette; the palette owns its own close (so pressing
   // ⌘K inside it can't bubble here and re-toggle).
@@ -553,6 +569,8 @@ export function Shell() {
           onOpenVault={openVaultFlow}
           onCluster={onCluster}
           clustering={clustering}
+          clusterError={clusterError}
+          onRetryCluster={onRetryCluster}
           pulseRef={graphPulseRef}
           onOpenNode={(p) => {
             setRailView('graph'); // surface the editor for the clicked note

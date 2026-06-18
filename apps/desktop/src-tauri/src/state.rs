@@ -21,6 +21,11 @@ pub struct AppState {
     /// `settings.json`). The generation serializes start↔stop so a stale stop from a
     /// StrictMode/rapid-toggle re-mount can't drop a newer start's watcher.
     pub activity: Mutex<(u64, Option<Box<dyn Any + Send>>)>,
+    /// v2.0: the cached embedding model (loads the ~90MB ONNX model once, reused across
+    /// recompute + semantic search). Vault-independent — survives `open_vault`. A failed
+    /// load is remembered so search doesn't silently re-download every call; the Clusters
+    /// Retry resets it. See `embed::ModelCache`.
+    pub model: Arc<Mutex<crate::embed::ModelCache>>,
 }
 
 impl AppState {
@@ -30,6 +35,7 @@ impl AppState {
             vault_root: Arc::new(Mutex::new(None)),
             watcher: Mutex::new(None),
             activity: Mutex::new((0, None)),
+            model: Arc::new(Mutex::new(crate::embed::ModelCache::default())),
         }
     }
 }

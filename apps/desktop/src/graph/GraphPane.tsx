@@ -17,6 +17,8 @@ export function GraphPane({
   onOpenVault,
   onCluster,
   clustering,
+  clusterError,
+  onRetryCluster,
   pulseRef,
   onOpenNode,
   activePath,
@@ -28,6 +30,9 @@ export function GraphPane({
   activePath?: string | null;
   onCluster?: () => void;
   clustering?: boolean;
+  /** v2.0: a failed embedding-model load (the ~90MB fetch) → show a Retry. */
+  clusterError?: string | null;
+  onRetryCluster?: () => void;
   /** Phase 8: Shell populates this with a node light-up fn (read=violet/modify=rose),
       reading the live renderer so it survives data-driven renderer rebuilds. */
   pulseRef?: MutableRefObject<((rel: string, action: 'read' | 'modify') => void) | null>;
@@ -264,6 +269,17 @@ export function GraphPane({
           >
             {clustering ? '…clustering' : 'Clusters'}
           </button>
+          {clusterError && !clustering && (
+            <button
+              className="gc-btn"
+              type="button"
+              onClick={onRetryCluster}
+              title={`Embedding model failed to load: ${clusterError}`}
+              style={{ color: 'var(--rose, #e0607e)' }}
+            >
+              ⚠ Retry
+            </button>
+          )}
           <button
             className={`gc-btn${gpuOn ? ' active' : ''}`}
             type="button"

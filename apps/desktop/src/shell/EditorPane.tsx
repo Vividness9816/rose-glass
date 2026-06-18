@@ -315,6 +315,7 @@ export function EditorPane({
             <div className="bl-label">
               Related · {related.hits.length}
               {related.stale ? ' · may be out of date' : ''}
+              {related.corpus_size > 0 ? ` · ${related.corpus_size} notes in ${related.elapsed_ms}ms` : ''}
             </div>
             {related.hits.map((h) => (
               <button key={h.path} className="bl-item" type="button" onClick={() => onOpenPath(h.path)}>
