@@ -11,7 +11,7 @@ with a riskiest-premise spike on a tiny scope before its build.
 | 4(2D) | `phase4-graph` | Canvas-2D living graph ported, de-hardcoded, on mock data (the §20 2D-fallback leg) | ✅ done (this session) |
 | 2 | `phase2-indexer` | Vault open + watcher + indexer + SQLite schema (§8); incremental + full-rebuild | ✅ done (A3 proven; review pass pending) |
 | 3 | `phase3-editor` | CodeMirror 6 editor pane (mockup parity), save path, live links/backlinks | ✅ done (reviewed) |
-| 4 | `phase4-webgpu` | WebGPU renderer at fixed 4K + drag node/cluster + zoom/pan + click-open; **spike: React19×design-libs + WebGPU 4K probe + fallback** | 🟢 interaction + airtight fallback DONE (3-lens reviewed); **WebGPU render + zoom GPU-VERIFIED on the RTX 5090** (`nvidia/blackwell`, `docs/proof/phase4-webgpu-*.png`). Residual: drag/pan/click feel + literal-4K + GPU-visual parity = optional user confirm (`phase4-graph`, `phase4-webgpu`) |
+| 4 | `phase4-webgpu` | WebGPU renderer at fixed 4K + drag node/cluster + zoom/pan + click-open; **spike: React19×design-libs + WebGPU 4K probe + fallback** | 🟢 interaction + airtight fallback DONE (3-lens reviewed); **WebGPU render + zoom GPU-VERIFIED on the RTX 5090** (`nvidia/blackwell`, `docs/proof/phase4-webgpu-*.png`). drag/pan/click + literal-4K confirmed. **ACTIVE NEXT — GPU-visual parity:** grow the WGSL to match the 2D look (node auras/glow, tributary particles, curved edges + arrowheads, hub rings) + port the **Focus dimming** and the **theme node-inversion** to the GPU path (both 2D-only today) (`phase4-graph`, `phase4-webgpu`) |
 | 5 | `phase5-search` | FTS5 search + ⌘K command palette (mockup glass) | ✅ done |
 | 6 | `phase6-glass` | Theme-aware **r3f-v9** living backdrop (shadergradient dead on R19) + **eamonliu** liquid-glass lens (dashersw incompatible w/ WebGL) + backdrop-filter chrome; light-theme **tuned**; dual-theme diffs | ✅ done (visual taste pending user eyeball) |
 | 7 | `phase7-terminal` | xterm.js + portable-pty; embedded shell at cwd=vault (runs Claude Code) | ✅ done (cargo 26/26, user-confirmed live) |
@@ -25,3 +25,9 @@ with a riskiest-premise spike on a tiny scope before its build.
 - **Phase 8** ships the §11.4 global-hook install + `~/.claude/projects` transcript-tail ONLY behind: explicit user OK · atomic `settings.json` backup + temp-write/rename + re-parse-validate-all-entries · `127.0.0.1`-only endpoint · no transcript persistence · secret-path redaction/exclusion · working uninstall.
 - **Phase 4 (WebGPU)** and **Phase 9 (PDF/docx engines)** open with a premise spike — never assume the hard pillar works; prove it on a tiny scope first. (Phase 9's spike proved pdf-lib *can* edit a PDF but mammoth is read-only → ADR-20260617 chose lossless view-only + edit-as-sibling-md over a lossy writer.)
 - Every `proven` row in STATUS.md cites a commit scope + a re-runnable artifact. No prose "verified."
+
+## Active frontier (post round-2 feedback, 2026-06-17 PM)
+Primary: **GPU shader parity** (Phase 4 row above). Then the round-2 fixes/features logged in
+PROGRESS.md "Round-2 live feedback": Focus-dim bug, palette-result-click bug, Share-clipboard
+(Tauri clipboard plugin), window controls/fullscreen (Tauri window perms), terminal rename +
+Claude-attention indicator, Properties disk size. Phase 12 (§20 v1.0 gate) closes after these.

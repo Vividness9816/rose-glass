@@ -23,6 +23,31 @@ pass shipped (all gated green per commit; `/impeccable` methodology for the visu
 - `e829835` **M2 arming**: `installer.rs` arm/disarm (re-validate → backup → atomic write) + Settings Arm/Disarm/Dry-run; live arm = the user's in-app confirm
 **Remaining:** GPU shader parity (auras/particles/curves/rings in WGSL — user-deprioritized last); the live app-window eyeball of the above + the in-app M2 arm.
 
+## Round-2 live feedback (2026-06-17 PM) — NEXT (all pending)
+User re-verified in-app. **Good:** graph life, theme flip, Search, All, docx fix, session
+persistence, terminal (base), Properties (base). **M2:** user armed it in-app (verification
+steps handed off). Outstanding (next session — primary task GPU parity, then these):
+- **GPU shader parity** (Ph4, was deprioritized): grow the WGSL to match the 2D look —
+  node auras/glow, tributary particles, curved edges + arrowheads, hub rings; ALSO port the
+  Focus dimming + the theme node-inversion to the GPU path (both currently 2D-only / no-op).
+- **BUG — Focus doesn't dim** (2D): "focus doesn't seem to work." Investigate
+  `GraphRenderer.setFocus` / `GraphPane` scope effect — likely `activePath` not matching a node
+  key (→ focusSet=null → no dim), a renderer-ref timing gap, or the user being on the GPU (no-op) path.
+- **BUG — palette result click doesn't open** (item 8): typing OR tag-click surfaces the right
+  files in the palette but clicking a result doesn't open it. Check `CommandPalette.choose` →
+  `onOpenNote` → Shell `openNote`, the `onMouseDown`/overlay-close ordering, and the hit.path.
+- **BUG — Share doesn't copy** (item 10): editor ↗ Copy-as-Markdown does nothing —
+  `navigator.clipboard.writeText` is almost certainly blocked in the Tauri webview. Switch to
+  `@tauri-apps/plugin-clipboard-manager` (add the plugin + permission).
+- **BUG — window controls still unusable** (items 3 + 11): user "still doesn't have a titlebar
+  with minimize, fullscreen, and close." The macOS traffic-light glyphs aren't landing. Diagnose
+  the Tauri window capability perms (`core:window:allow-minimize/maximize/close/...`) — `windowAction`
+  may be silently failing — and make the controls obvious + add a real **fullscreen** toggle.
+- **FEAT — terminal tabs** (item 7): rename a tab by double-clicking its name; show a green
+  attention indicator on a Claude-running tab when it needs input (detect from PTY output — bell/prompt).
+- **FEAT — Properties disk size** (item 9): add the file's on-disk byte size to the Properties popover
+  (a small stat IPC, or reuse a size from metadata).
+
 ## Done — built · reviewed · verified · pushed
 - **Council → ADR** (foundation-first staged execution; the spec's literal 1-shot is unverifiable in one session).
 - **Phase 0** — pnpm workspace + Tauri 2 boots + `tokens.css` verbatim from the mockup + live dark/light theme + self-hosted Inter/JetBrains Mono.
