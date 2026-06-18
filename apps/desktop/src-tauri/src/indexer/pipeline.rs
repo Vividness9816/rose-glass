@@ -45,8 +45,18 @@ const SKIP_DIRS: &[&str] = &["node_modules", "target", "dist", "build", "vendor"
 /// watcher-indexed yet rebuild-excluded, breaking A3. Re-add only via a shared nested
 /// matcher across all three paths if it's ever worth the plumbing (see ADR-20260618-v2).
 pub(crate) fn should_skip(rel: &str) -> bool {
-    rel.split('/')
-        .any(|seg| seg.starts_with('.') || SKIP_DIRS.contains(&seg))
+    rel.split('/').any(|seg| {
+        if seg.starts_with('.') {
+            return true;
+        }
+        // Windows FS is case-insensitive — "Node_Modules" must skip like "node_modules"
+        // (mirrors activity.rs's Windows-only case-fold). On Linux those are distinct dirs.
+        if cfg!(windows) {
+            SKIP_DIRS.iter().any(|s| seg.eq_ignore_ascii_case(s))
+        } else {
+            SKIP_DIRS.contains(&seg)
+        }
+    })
 }
 
 /// Vault-relative, forward-slash path; `None` if the name isn't valid UTF-8.
@@ -265,6 +275,16 @@ mod tests {
         for real in ["notes/real.md", "a/b/c.md", "inbox/dropped.md"] {
             assert!(!should_skip(real), "should keep {real}");
         }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn should_skip_is_case_insensitive_on_windows() {
+        // Windows FS is case-insensitive: a mixed-case junk dir must still be skipped, else
+        // a live edit could index a note a rebuild drops (or vice versa).
+        assert!(should_skip("Node_Modules/pkg/x.md"));
+        assert!(should_skip("a/TARGET/debug/x.md"));
+        assert!(!should_skip("notes/real.md"));
     }
 
     #[test]

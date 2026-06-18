@@ -25,14 +25,17 @@ fn canonical_root(p: &Path) -> PathBuf {
 }
 
 /// Strip the Windows `\\?\` verbatim prefix so canonical paths compare against the
-/// un-prefixed forms the dialog / drag-drop / CC report. No-op on non-Windows or UNC.
+/// un-prefixed forms the dialog / drag-drop / CC report. No-op on non-Windows. UNC paths
+/// (`\\?\UNC\server\share\…`) are rewritten to their reported `\\server\share\…` form —
+/// otherwise a network-hosted vault's activity would all mis-classify as External.
 fn strip_verbatim(c: PathBuf) -> PathBuf {
     if cfg!(windows) {
         if let Some(s) = c.to_str() {
-            if let Some(stripped) = s.strip_prefix(r"\\?\") {
-                if !stripped.starts_with("UNC\\") {
-                    return PathBuf::from(stripped);
-                }
+            if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+                return PathBuf::from(format!(r"\\{rest}"));
+            }
+            if let Some(rest) = s.strip_prefix(r"\\?\") {
+                return PathBuf::from(rest);
             }
         }
     }
@@ -564,6 +567,12 @@ fn ingest_blocking(
     db: &std::sync::Mutex<rusqlite::Connection>,
     abs_path: &str,
 ) -> Result<IngestResult, String> {
+    // Re-canonicalize the root the SAME way as the source below, so the inside/outside
+    // decision compares like with like even if canonical_root fell back to a non-canonical
+    // path at open-time (then both forms are consistent — A path mismatch can't strand an
+    // in-vault file as "external").
+    let root_canon = strip_verbatim(std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf()));
+    let root = root_canon.as_path();
     let src = strip_verbatim(
         std::fs::canonicalize(abs_path).map_err(|e| format!("cannot resolve dropped file: {e}"))?,
     );
@@ -703,6 +712,18 @@ mod tests {
         let png = outside.path().join("x.png");
         std::fs::write(&png, b"\x89PNG").unwrap();
         assert!(ingest_blocking(&root, &db, png.to_str().unwrap()).is_err(), "unknown ext rejected");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn strip_verbatim_handles_drive_and_unc() {
+        // \\?\C:\… → C:\…  and  \\?\UNC\server\share\… → \\server\share\… (the reported form)
+        assert_eq!(strip_verbatim(PathBuf::from(r"\\?\C:\Users\x")), PathBuf::from(r"C:\Users\x"));
+        assert_eq!(
+            strip_verbatim(PathBuf::from(r"\\?\UNC\server\share\v")),
+            PathBuf::from(r"\\server\share\v")
+        );
+        assert_eq!(strip_verbatim(PathBuf::from(r"C:\plain")), PathBuf::from(r"C:\plain"));
     }
 
     #[test]

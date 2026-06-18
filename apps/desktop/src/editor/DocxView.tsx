@@ -17,7 +17,7 @@ import { readFileBytes } from '../ipc';
 type ToMarkdown = (input: { arrayBuffer: ArrayBuffer }) => Promise<{ value: string }>;
 const convertToMarkdown = (mammoth as unknown as { convertToMarkdown: ToMarkdown }).convertToMarkdown;
 
-// Untrusted-docx hardening (the app has no CSP backstop — tauri.conf csp:null). DOMPurify
+// Untrusted-docx hardening (defense-in-depth alongside the v2.0 CSP in tauri.conf). DOMPurify
 // already strips script/javascript:/event-handlers; this also kills the offline-first leaks:
 // a remote <img src> auto-fetches on render (a tracking beacon), and we neutralize anchors.
 // Module-level (DocxView is the only DOMPurify caller); anchor *navigation* is handled by the
