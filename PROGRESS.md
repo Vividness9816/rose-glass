@@ -23,35 +23,39 @@ pass shipped (all gated green per commit; `/impeccable` methodology for the visu
 - `e829835` **M2 arming**: `installer.rs` arm/disarm (re-validate → backup → atomic write) + Settings Arm/Disarm/Dry-run; live arm = the user's in-app confirm
 **Remaining:** GPU shader parity (auras/particles/curves/rings in WGSL — user-deprioritized last); the live app-window eyeball of the above + the in-app M2 arm.
 
-## Round-2 live feedback (2026-06-17 PM) — NEXT (all pending)
-User re-verified in-app. **Good:** graph life, theme flip, Search, All, docx fix, session
-persistence, terminal (base), Properties (base). **M2:** user armed it in-app (verification
-steps handed off). Outstanding (next session — the round-2 fixes; GPU parity is now DONE):
-- ✅ **GPU shader parity DONE** (Ph4, 2026-06-17): the WGSL was grown to the full 2D look via
-  3 instanced pipelines (sprite/ring/ribbon) — cluster auras/glow, curved edges + arrowheads +
-  trails, tributary particles, hub rings + orbiting dots — and the **Focus dimming** + **theme
-  bullseye inversion** ports (both were 2D-only no-ops). Riskiest-premise spike first (`ribbon.ts`
-  bezier→ribbon tessellator, pure + 8/8 unit-tested). 3-lens reviewed (7 LOW, all fixed).
-  GPU-verified dark+light on the RTX 5090 (`docs/proof/phase4-parity-*.png`). Only hub text labels
-  stay 2D (glyph-atlas ceiling). **Note:** the user's "focus doesn't dim" was likely the GPU no-op
-  path — now ported; the 2D-path Focus bug below still needs an end-to-end check.
-- **BUG — Focus doesn't dim** (2D): "focus doesn't seem to work." Investigate
-  `GraphRenderer.setFocus` / `GraphPane` scope effect — likely `activePath` not matching a node
-  key (→ focusSet=null → no dim), a renderer-ref timing gap, or the user being on the GPU (no-op) path.
-- **BUG — palette result click doesn't open** (item 8): typing OR tag-click surfaces the right
-  files in the palette but clicking a result doesn't open it. Check `CommandPalette.choose` →
-  `onOpenNote` → Shell `openNote`, the `onMouseDown`/overlay-close ordering, and the hit.path.
-- **BUG — Share doesn't copy** (item 10): editor ↗ Copy-as-Markdown does nothing —
-  `navigator.clipboard.writeText` is almost certainly blocked in the Tauri webview. Switch to
-  `@tauri-apps/plugin-clipboard-manager` (add the plugin + permission).
-- **BUG — window controls still unusable** (items 3 + 11): user "still doesn't have a titlebar
-  with minimize, fullscreen, and close." The macOS traffic-light glyphs aren't landing. Diagnose
-  the Tauri window capability perms (`core:window:allow-minimize/maximize/close/...`) — `windowAction`
-  may be silently failing — and make the controls obvious + add a real **fullscreen** toggle.
-- **FEAT — terminal tabs** (item 7): rename a tab by double-clicking its name; show a green
-  attention indicator on a Claude-running tab when it needs input (detect from PTY output — bell/prompt).
-- **FEAT — Properties disk size** (item 9): add the file's on-disk byte size to the Properties popover
-  (a small stat IPC, or reuse a size from metadata).
+## Round-2 live feedback (2026-06-17 PM) — DONE (gates green; live behavior = user eyeball)
+User re-verified in-app. All round-2 items addressed (tsc 0 · vitest 67/67 · cargo 53/53 +9 mcp ·
+clippy 0; the GPU item + a pre-commit self-audit reviewed). Tauri-only behaviors (window/clipboard/
+terminal/properties live render) are code-complete + compile-verified — the live confirm is the app eyeball.
+- ✅ **GPU shader parity DONE** (Ph4, 2026-06-17, commit `7fd4ae9`): the WGSL grown to the full 2D
+  look via 3 instanced pipelines (sprite/ring/ribbon) — cluster auras/glow, curved edges + arrowheads +
+  trails, tributary particles, hub rings + orbiting dots — and the **Focus dimming** + **theme bullseye
+  inversion** ports. Riskiest-premise spike first (`ribbon.ts`, 8/8). 3-lens reviewed (7 LOW, all fixed).
+  GPU-verified dark+light on the RTX 5090 (`docs/proof/phase4-parity-*.png`). Only hub text labels stay 2D.
+- ✅ **Focus doesn't dim** — root cause was the **GPU no-op path** (`setFocus` was a no-op on the GPU
+  renderer; the user had GPU toggled on). Ported to GPU (commit `7fd4ae9`). The 2D path is correct —
+  verified by tracing: `indexer/pipeline.rs` normalizes all DB paths to `/`, so `note.path` (get_note) ≡
+  graph `node.path` (get_graph_payload); `lookupNodeByRel` also has a case-folded fallback.
+- ✅ **Palette result click doesn't open** — `CommandPalette.onOpenNote` now `setRailView('graph')` before
+  `openNote` (Shell.tsx), so a result picked from a non-graph rail (tag-click/notes/settings/activity) no
+  longer opens the note behind the current pane. Matches the onOpenNode / NotesPane.onOpen pattern.
+- ✅ **Share doesn't copy** — `@tauri-apps/plugin-clipboard-manager` `writeText` in the Tauri webview
+  (navigator.clipboard fallback on web); added the npm + Rust crate + `clipboard-manager:allow-write-text`.
+- ✅ **Window controls + fullscreen** — traffic-light ×−+ glyphs now visible at rest (were hover-only
+  opacity 0); added a ⛶ **fullscreen** toggle (`setFullscreen(!isFullscreen())`) + `core:window:allow-set-
+  fullscreen`/`is-fullscreen`. (minimize/close/toggle-maximize were already permitted — they work.)
+- ✅ **Terminal tabs** — double-click a tab name to rename (Esc cancels, Enter/blur commits); a pulsing
+  green attention dot on a background tab whose PTY rings the bell (xterm `onBell` → `markTermAttention`,
+  cleared on select). ponytail: bell is the one concrete signal; a fuller prompt-parse heuristic is deferred.
+- ✅ **Properties disk size** — new `file_size` IPC (vault-relative `safe_join` + `is_file`, same guard as
+  read_file_bytes) → a "size" row in the Properties popover.
+- ✅ **M2 hook** — DECISION: **view-only / deferred** (M1 transcript-tail is the active, verified mechanism;
+  a global per-tool-use hook + M1↔M2 dedup is disproportionate for the latency gain — ADR-20260617's
+  original reasoning). Fixed the harm: the planned hook command was a broken `node "$ROSE_GLASS_ACTIVITY_HOOK"`
+  that ERRORED on each tool-use → now a harmless self-contained **no-op** (`node -e 0`, always exit 0). Settings
+  UI relabeled honestly ("M2 deferred — no-op placeholder"). settings.json never written autonomously; arm/
+  disarm stays the user's click (the proven backup/validate/atomic install path is unchanged). **If you armed
+  the old placeholder, Disarm it** (it has no active consumer; M1 delivers).
 
 ## Done — built · reviewed · verified · pushed
 - **Council → ADR** (foundation-first staged execution; the spec's literal 1-shot is unverifiable in one session).

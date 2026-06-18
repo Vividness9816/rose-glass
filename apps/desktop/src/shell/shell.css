@@ -46,14 +46,14 @@
 .tl-close { background: var(--tl-close); }
 .tl-min { background: var(--tl-min); }
 .tl-max { background: var(--tl-max); }
-/* macOS-style reveal: the dots show their × − + glyphs (and a tooltip) on hover, so
-   they read unmistakably as minimize / maximize / close window controls. */
+/* The dots carry their × − + glyphs at rest (so they read unmistakably as close /
+   minimize / maximize window controls — not decoration), brightening on hover/focus. */
 .tl-glyph {
   font-size: 10px;
   line-height: 1;
   font-weight: 700;
   color: var(--tl-glyph);
-  opacity: 0;
+  opacity: 0.55;
   transition: opacity var(--dur-fast) var(--ease);
 }
 .traffic-lights:hover .tl-glyph,

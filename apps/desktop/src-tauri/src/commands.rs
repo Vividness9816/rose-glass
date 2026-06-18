@@ -209,6 +209,21 @@ pub async fn read_file_bytes(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// On-disk byte size of a vault file (for the Properties popover). Vault-relative,
+/// safe_join-guarded, regular-file only — a cheap stat, no read.
+#[tauri::command]
+pub async fn file_size(state: State<'_, AppState>, path: String) -> Result<u64, IpcError> {
+    let root = lock(&state.vault_root)
+        .clone()
+        .ok_or_else(|| IpcError("no vault open".into()))?;
+    let abs = crate::fs_safe::safe_join(&root, &path)?;
+    let meta = std::fs::metadata(&abs)?;
+    if !meta.is_file() {
+        return Err(IpcError("target is not a regular file".into()));
+    }
+    Ok(meta.len())
+}
+
 #[tauri::command]
 pub async fn resolve_link(
     state: State<'_, AppState>,

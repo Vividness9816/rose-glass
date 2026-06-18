@@ -1,15 +1,17 @@
 /* Titlebar — draggable, traffic lights wired to the Tauri window (no-op
    outside Tauri, e.g. under plain Vite / Playwright), right action cluster. */
 
-async function windowAction(action: 'close' | 'minimize' | 'toggleMaximize') {
+async function windowAction(action: 'close' | 'minimize' | 'toggleMaximize' | 'toggleFullscreen') {
   try {
     const { getCurrentWindow } = await import('@tauri-apps/api/window');
     const w = getCurrentWindow();
     if (action === 'close') await w.close();
     else if (action === 'minimize') await w.minimize();
+    else if (action === 'toggleFullscreen') await w.setFullscreen(!(await w.isFullscreen()));
     else await w.toggleMaximize();
-  } catch {
-    /* not running under Tauri — controls are inert */
+  } catch (e) {
+    /* not running under Tauri (web build) — controls are inert */
+    console.debug('window action unavailable:', e);
   }
 }
 
@@ -61,6 +63,15 @@ export function Titlebar({
       </div>
       <div className="title-center">{vault} — Rose Glass</div>
       <div className="titlebar-right">
+        <button
+          className="tb-btn"
+          type="button"
+          onClick={() => windowAction('toggleFullscreen')}
+          title="Toggle fullscreen"
+          aria-label="Toggle fullscreen"
+        >
+          ⛶
+        </button>
         <button className="tb-btn" type="button" onClick={onSearch}>⌘K Search</button>
         <button
           className="tb-btn"

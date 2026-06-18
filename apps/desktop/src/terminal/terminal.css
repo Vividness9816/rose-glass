@@ -31,6 +31,32 @@
   background: var(--rose);
   box-shadow: 0 0 6px var(--rose);
 }
+/* Attention: a background tab whose PTY rang the bell (e.g. Claude Code awaiting input).
+   Higher-specificity selector beats the active/idle opacity rules below; ponytail: literal
+   emerald — a one-off liveness dot, not a themed surface (A10 governs graph/app tokens). */
+.terminal-tab .terminal-dot.attn {
+  background: #34d399;
+  box-shadow: 0 0 6px #34d399;
+  opacity: 1;
+  animation: term-attn-pulse 1.2s ease-in-out infinite;
+}
+@keyframes term-attn-pulse {
+  0%, 100% { box-shadow: 0 0 4px #34d399; }
+  50% { box-shadow: 0 0 9px #34d399; }
+}
+.terminal-tab-rename {
+  background: var(--surface-1);
+  border: 1px solid var(--border-mid);
+  border-radius: 3px;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  padding: 1px 4px;
+  width: 90px;
+  outline: none;
+}
+.terminal-tab-rename:focus { border-color: var(--rose); }
 .terminal-title {
   font-size: 11px;
   font-family: var(--font-mono);

@@ -67,11 +67,13 @@ export function SettingsPane({
           </div>
         </div>
         <div className="sp-field">
-          <div className="sp-field-label">Claude Code activity hook (optional)</div>
+          <div className="sp-field-label">Claude Code activity hook (optional · M2 deferred)</div>
           <div className="sp-field-value">
-            The activity mirror already works via the always-on transcript tail. Arming adds a
-            global hook for lower latency — it edits <code>~/.claude/settings.json</code> behind a
-            timestamped backup + a re-validation that every existing hook survives. Disarm reverts.
+            The activity mirror already works via the always-on transcript tail (M1). The global
+            hook (M2) is a safe, reversible <em>no-op placeholder</em> — its event forwarding is
+            deferred, so arming it has no runtime effect today; it only exercises the proven install
+            path. It edits <code>~/.claude/settings.json</code> behind a timestamped backup + a
+            re-validation that every existing hook survives. Disarm reverts.
           </div>
           <div className="sp-hook-actions">
             <button type="button" className="sp-btn" onClick={() => void runHook('plan')} disabled={hookBusy}>

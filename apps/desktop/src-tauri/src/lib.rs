@@ -19,6 +19,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             // Start on an in-memory schema so reads before a vault is opened don't
             // error; open_vault swaps in the vault's on-disk index.db.
@@ -39,6 +40,7 @@ pub fn run() {
             commands::read_note_file,
             commands::save_note_file,
             commands::read_file_bytes,
+            commands::file_size,
             commands::resolve_link,
             commands::recompute_clusters,
             commands::activity_start,

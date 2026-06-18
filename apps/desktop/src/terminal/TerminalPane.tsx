@@ -36,9 +36,12 @@ function xtermTheme() {
   };
 }
 
-export function TerminalPane({ theme }: { theme: Theme }) {
+export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention?: () => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  // Latest callback without re-running the (mount-once) PTY effect.
+  const onAttentionRef = useRef(onAttention);
+  onAttentionRef.current = onAttention;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -56,6 +59,11 @@ export function TerminalPane({ theme }: { theme: Theme }) {
     term.loadAddon(fit);
     term.open(host);
     fit.fit();
+    // Attention heuristic: a child (e.g. Claude Code awaiting input) rings the terminal
+    // bell (BEL / \x07). xterm surfaces that as onBell — the Shell flags the tab green if
+    // it isn't the active one. ponytail: bell is the one concrete signal; a fuller "is the
+    // prompt waiting" heuristic would have to parse PTY output for shell-specific prompts.
+    term.onBell(() => onAttentionRef.current?.());
 
     let id = -1;
     let unOut: UnlistenFn | undefined;

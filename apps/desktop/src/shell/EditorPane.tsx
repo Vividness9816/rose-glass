@@ -4,9 +4,9 @@
    (PdfView / DocxView). The .docx "Edit as Markdown" action surfaces through
    onEditAsMarkdown (Phase 9 / ADR-20260617). */
 
-import { lazy, Suspense, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { EditorView } from '@codemirror/view';
-import type { BacklinkDto, NoteDto } from '../ipc';
+import { fileSize, inTauri, type BacklinkDto, type NoteDto } from '../ipc';
 import { CodeMirrorHost } from '../editor/CodeMirrorHost';
 import { editorKind } from '../editor/editorKind';
 import { parseOutline } from '../editor/outline';
@@ -33,6 +33,12 @@ function relativeTime(mtimeMs: number): string {
   if (days <= 0) return 'today';
   if (days === 1) return 'yesterday';
   return `${days} days ago`;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function Breadcrumb({ path, current }: { path: string[]; current: string }) {
@@ -64,6 +70,22 @@ export function EditorPane({
   const editorViewRef = useRef<EditorView | null>(null);
   const [panel, setPanel] = useState<'none' | 'outline' | 'properties'>('none');
   const [copied, setCopied] = useState(false);
+  const [sizeBytes, setSizeBytes] = useState<number | null>(null);
+
+  // Fetch the note's on-disk byte size when the Properties popover opens (cheap stat IPC).
+  useEffect(() => {
+    setSizeBytes(null);
+    if (panel !== 'properties' || !note || !inTauri()) return;
+    let cancelled = false;
+    fileSize(note.path)
+      .then((n) => {
+        if (!cancelled) setSizeBytes(n);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [panel, note]);
 
   const scrollToLine = (line: number) => {
     const view = editorViewRef.current;
@@ -76,11 +98,19 @@ export function EditorPane({
   };
   const onShare = async () => {
     try {
-      await navigator.clipboard.writeText(doc);
+      // navigator.clipboard is blocked in the Tauri webview → use the clipboard plugin
+      // there; fall back to the Web API for the plain browser build.
+      if (inTauri()) {
+        const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
+        await writeText(doc);
+      } else {
+        await navigator.clipboard.writeText(doc);
+      }
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard unavailable (denied / non-secure context) */
+    } catch (e) {
+      // expected on the web build (navigator.clipboard denied in a non-secure context)
+      console.debug('copy as markdown failed:', e);
     }
   };
 
@@ -180,16 +210,17 @@ export function EditorPane({
         )}
         {panel === 'properties' && (
           <div className="editor-popover">
-            {fm && Object.keys(fm).length > 0 ? (
+            <div className="ep-row">
+              <span className="ep-key">size</span>
+              <span className="ep-val">{sizeBytes != null ? formatBytes(sizeBytes) : '…'}</span>
+            </div>
+            {fm &&
               Object.entries(fm).map(([k, v]) => (
                 <div key={k} className="ep-row">
                   <span className="ep-key">{k}</span>
                   <span className="ep-val">{String(v)}</span>
                 </div>
-              ))
-            ) : (
-              <div className="ep-empty">No frontmatter properties.</div>
-            )}
+              ))}
           </div>
         )}
       </div>

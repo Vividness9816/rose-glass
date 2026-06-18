@@ -78,6 +78,10 @@ export function Shell() {
   const [terminalOpen, setTerminalOpen] = useState(false); // is the terminal drawer VISIBLE
   const [terminals, setTerminals] = useState<number[]>([]); // open tab ids — each is a live PTY kept alive while hidden
   const [activeTerm, setActiveTerm] = useState(-1);
+  const [termNames, setTermNames] = useState<Record<number, string>>({}); // custom tab names
+  const [termAttention, setTermAttention] = useState<Set<number>>(() => new Set()); // tabs needing input
+  const [editingTerm, setEditingTerm] = useState<number | null>(null); // tab being renamed
+  const renameCancelRef = useRef(false); // Esc-cancel flag (blur fires on the unmount, must not commit)
   const nextTermIdRef = useRef(1);
   const activeTermRef = useRef(activeTerm);
   activeTermRef.current = activeTerm;
@@ -151,6 +155,32 @@ export function Shell() {
       else if (id === activeTermRef.current) setActiveTerm(next[next.length - 1]);
       return next;
     });
+  }, []);
+
+  // Switching to a tab clears its attention flag (you're now looking at it).
+  const selectTerm = useCallback((id: number) => {
+    setActiveTerm(id);
+    setTermAttention((s) => {
+      if (!s.has(id)) return s;
+      const n = new Set(s);
+      n.delete(id);
+      return n;
+    });
+  }, []);
+  // A background tab's PTY rang the bell (e.g. Claude Code awaiting input) → flag it green.
+  const markTermAttention = useCallback((id: number) => {
+    if (id === activeTermRef.current) return; // already focused — nothing to flag
+    setTermAttention((s) => (s.has(id) ? s : new Set(s).add(id)));
+  }, []);
+  const commitTermRename = useCallback((id: number, value: string) => {
+    const name = value.trim();
+    setTermNames((prev) => {
+      const next = { ...prev };
+      if (name) next[id] = name;
+      else delete next[id]; // cleared → fall back to the default "terminal N"
+      return next;
+    });
+    setEditingTerm(null);
   }, []);
 
   const saver = useMemo(
@@ -571,7 +601,17 @@ export function Shell() {
         onToggleTheme={onToggleTheme}
       />
       {paletteOpen && (
-        <CommandPalette onClose={closePalette} onOpenNote={openNote} initialQuery={paletteQuery} />
+        <CommandPalette
+          onClose={closePalette}
+          // surface the editor for the picked note — the palette can be opened from a
+          // non-graph rail (tag-click → tags pane, search rail, notes/settings/activity),
+          // where opening a note behind the current pane reads as "click does nothing".
+          onOpenNote={(p) => {
+            setRailView('graph');
+            void openNote(p);
+          }}
+          initialQuery={paletteQuery}
+        />
       )}
       {/* Once opened, the drawer stays MOUNTED so its PTYs keep running; Ctrl+` just
           hides it (display:none). Each tab is a keyed TerminalPane — only the active one
@@ -584,10 +624,46 @@ export function Shell() {
                 <div
                   key={id}
                   className={`terminal-tab${id === activeTerm ? ' active' : ''}`}
-                  onClick={() => setActiveTerm(id)}
+                  onClick={() => selectTerm(id)}
                 >
-                  <span className="terminal-dot" />
-                  <span className="terminal-tab-label">terminal {i + 1}</span>
+                  <span
+                    className={`terminal-dot${termAttention.has(id) ? ' attn' : ''}`}
+                    title={termAttention.has(id) ? 'Waiting for input' : undefined}
+                  />
+                  {editingTerm === id ? (
+                    <input
+                      className="terminal-tab-rename"
+                      defaultValue={termNames[id] ?? `terminal ${i + 1}`}
+                      autoFocus
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') commitTermRename(id, e.currentTarget.value);
+                        else if (e.key === 'Escape') {
+                          renameCancelRef.current = true; // discard: the unmount's blur must not commit
+                          setEditingTerm(null);
+                        }
+                      }}
+                      onBlur={(e) => {
+                        if (renameCancelRef.current) {
+                          renameCancelRef.current = false;
+                          setEditingTerm(null);
+                          return;
+                        }
+                        commitTermRename(id, e.currentTarget.value);
+                      }}
+                    />
+                  ) : (
+                    <span
+                      className="terminal-tab-label"
+                      title="Double-click to rename"
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        setEditingTerm(id);
+                      }}
+                    >
+                      {termNames[id] ?? `terminal ${i + 1}`}
+                    </span>
+                  )}
                   <button
                     className="terminal-tab-close"
                     type="button"
@@ -629,7 +705,7 @@ export function Shell() {
                 className="terminal-tabpane"
                 style={{ display: id === activeTerm ? 'flex' : 'none' }}
               >
-                <TerminalPane theme={theme} />
+                <TerminalPane theme={theme} onAttention={() => markTermAttention(id)} />
               </div>
             ))}
           </div>

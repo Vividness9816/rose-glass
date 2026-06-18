@@ -22,16 +22,23 @@ use std::path::Path;
 /// exactly our entry (never a foreign one) to remove.
 pub const HOOK_MARKER: &str = "rose-glass-activity";
 
-/// The PostToolUse entry Rose Glass would add. File-append variant (no network — the
-/// app tails the activity file for lower latency than waiting on the full transcript
-/// flush). ponytail: the exact command is finalized at arming time; this is a
-/// well-formed, marked entry so the merge/validate/uninstall logic is proven now.
+/// The PostToolUse entry Rose Glass would add.
+///
+/// M2 forwarding is DEFERRED: M1 (transcript-tail, `activity.rs`) is the active, verified
+/// delivery mechanism, so the global hook ships as a **harmless self-contained no-op**
+/// (`node -e 0`, always exit 0, no env var, no external file) rather than a forwarder.
+/// Rationale: a real forwarder means a command spawned on EVERY tool-use of EVERY Claude
+/// Code session (not just Rose Glass) plus M1↔M2 dedup — a disproportionate cost + security
+/// surface for a latency gain M1 already covers. The old `node "$ROSE_GLASS_ACTIVITY_HOOK"`
+/// placeholder ERRORED on each tool-use (unset env var); this no-op cannot. Arming it is a
+/// safe, marked, idempotent entry — the proven merge/validate/uninstall logic stands, and a
+/// real forwarder can replace the command body later without touching that logic.
 pub fn rose_glass_hook_entry() -> Value {
     json!({
         "matcher": "Read|Edit|Write|MultiEdit",
         "hooks": [{
             "type": "command",
-            "command": format!("node \"$ROSE_GLASS_ACTIVITY_HOOK\" # {HOOK_MARKER}"),
+            "command": format!("node -e 0  # {HOOK_MARKER} (M2 forwarding deferred — M1 transcript-tail is the active mechanism)"),
             "timeout": 5
         }]
     })

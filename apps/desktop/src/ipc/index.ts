@@ -64,6 +64,9 @@ export const reindex = () => invoke<OpenVaultResult>('reindex');
  *  Slow on first run (downloads the model). Emits index:rebuilt so the graph recolours. */
 export const recomputeClusters = () => invoke<number>('recompute_clusters');
 
+/** On-disk byte size of a vault file (Properties popover). Vault-relative + safe_join-guarded. */
+export const fileSize = (path: string) => invoke<number>('file_size', { path });
+
 export const readNoteFile = (path: string) => invoke<string>('read_note_file', { path });
 export const saveNoteFile = (path: string, content: string) =>
   invoke<void>('save_note_file', { path, content });
