@@ -10,6 +10,7 @@ import { type GraphTheme, rgba } from './themeColors';
 import { type Camera, IDENTITY_CAMERA, panBy, screenToWorld, zoomAt } from './camera';
 import { nodeAtWorld } from './hitTest';
 import { stepSimulation } from './simulation';
+import { DEFAULT_CONFIG, type GraphConfig } from './config';
 import type { GraphRendererLike } from './Renderer';
 
 /** Index nodes for activity light-up by path, with a case-folded fallback map: CC
@@ -77,6 +78,7 @@ export class GraphRenderer implements GraphRendererLike {
   // Local-graph focus (the "Focus" scope): when set, only these node ids render at
   // full strength; everything else is dimmed. null = the whole graph ("All").
   private focusSet: Set<number> | null = null;
+  private config: GraphConfig = DEFAULT_CONFIG; // v2.0 user-tunable physics
 
   constructor(canvas: HTMLCanvasElement, data: GraphData, theme: GraphTheme, dpr = 1) {
     const ctx = canvas.getContext('2d');
@@ -97,6 +99,10 @@ export class GraphRenderer implements GraphRendererLike {
 
   setTheme(theme: GraphTheme) {
     this.theme = theme;
+  }
+
+  setConfig(config: GraphConfig) {
+    this.config = config;
   }
 
   /** Phase 8: light up the node for `rel` — read=violet pulse, modify=rose flare
@@ -202,7 +208,7 @@ export class GraphRenderer implements GraphRendererLike {
       this.draggingId !== null ? this.data.nodes.find((n) => n.id === this.draggingId) : undefined;
     const px = drag?.x;
     const py = drag?.y;
-    stepSimulation(this.data.nodes, this.W, this.H);
+    stepSimulation(this.data.nodes, this.W, this.H, undefined, this.config);
     if (drag && px !== undefined && py !== undefined) {
       // keep the dragged node pinned under the cursor (others still react to it)
       drag.x = px;

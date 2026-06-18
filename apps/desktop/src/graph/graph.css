@@ -92,3 +92,101 @@
   pointer-events: none;
   z-index: 1;
 }
+
+/* v2.0 — graph settings (physics/colors) panel, top-right of the graph */
+.gcfg-gear,
+.gcfg-panel {
+  position: absolute;
+  top: 44px;
+  right: 10px;
+  z-index: 5;
+  font-family: var(--font-mono);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.gcfg-gear {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border-mid);
+  background: var(--surface-2, rgba(20, 16, 22, 0.55));
+  color: var(--text-3);
+  font-size: 12px;
+  cursor: default;
+  transition: all var(--dur-fast) var(--ease);
+}
+.gcfg-gear:hover {
+  color: var(--text-1);
+  border-color: var(--border-strong);
+}
+.gcfg-panel {
+  width: 208px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border-mid);
+  background: var(--surface-2, rgba(20, 16, 22, 0.82));
+  color: var(--text-2);
+  font-size: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+}
+.gcfg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-1);
+  letter-spacing: 0.04em;
+}
+.gcfg-x {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: 14px;
+  line-height: 1;
+  cursor: default;
+}
+.gcfg-x:hover {
+  color: var(--rose-bright);
+}
+.gcfg-modes {
+  display: flex;
+  gap: 4px;
+}
+.gcfg-modes .gc-btn {
+  flex: 1;
+}
+.gcfg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gcfg-label {
+  width: 62px;
+  color: var(--text-3);
+}
+.gcfg-row input[type='range'] {
+  flex: 1;
+  accent-color: var(--rose);
+  height: 14px;
+}
+.gcfg-row input[type='range']:disabled {
+  opacity: 0.35;
+}
+.gcfg-swatches {
+  display: flex;
+  gap: 6px;
+}
+.gcfg-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border-mid);
+  border-radius: 4px;
+  background: none;
+  cursor: default;
+}
+.gcfg-reset {
+  align-self: flex-end;
+}

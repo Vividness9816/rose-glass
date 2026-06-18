@@ -9,10 +9,7 @@
    visual contract and d3-force would change the look; see docs/decisions.md. */
 
 import type { GraphNode } from './types';
-
-/** Idle-drift amplitude — the graph's continuous "breathing". Tuned so cohesion still
-    holds clusters together while every node visibly wanders. */
-const DRIFT = 0.06;
+import { DEFAULT_CONFIG, type GraphConfig } from './config';
 
 /** Deterministic RNG (mulberry32) — seed the jitter so a simulation run is
     reproducible in tests; production uses Math.random. */
@@ -28,33 +25,40 @@ export function makeRng(seed: number): () => number {
 }
 
 /** Advance the layout one tick, mutating node x/y/vx/vy/phase in place. Pure given
-    `rng` (defaults to Math.random). W/H are the logical (CSS-px) bounds. */
+    `rng` (defaults to Math.random). W/H are the logical (CSS-px) bounds. `cfg` supplies
+    the user-tunable physics; DEFAULT_CONFIG reproduces the v1.0 hardcoded model exactly. */
 export function stepSimulation(
   nodes: GraphNode[],
   W: number,
   H: number,
   rng: () => number = Math.random,
+  cfg: GraphConfig = DEFAULT_CONFIG,
 ): void {
+  // 'fixed' mode: kill the idle drift + noise and damp hard so nodes settle into their
+  // gravity/repulsion equilibrium and HOLD (still draggable), instead of free-floating.
+  const fixed = cfg.mode === 'fixed';
+  const drift = fixed ? 0 : cfg.drift;
+  const damping = fixed ? 0.6 : cfg.damping;
   nodes.forEach((n) => {
     // Continuous organic drift: each node wanders on its OWN seeded phase, so the whole
-    // graph keeps gently flowing instead of settling into a frozen equilibrium. A coherent
-    // sine survives the velocity damping below; the old ±random jitter averaged to zero and
-    // damped out, which is exactly why the graph looked rigid until a node was dragged. Two
+    // graph keeps gently flowing instead of settling into a frozen equilibrium. Two
     // incommensurate frequencies (1.0 / 0.7) make an organic Lissajous wander, not a straight
-    // diagonal. ponytail: DRIFT is the single liveliness dial — raise for more motion.
-    n.vx += Math.cos(n.phase) * DRIFT;
-    n.vy += Math.sin(n.phase * 0.7 + 1.3) * DRIFT;
-    n.vx += (rng() - 0.5) * 0.02; // a touch of noise so the wander isn't perfectly periodic
-    n.vy += (rng() - 0.5) * 0.02;
-    // cohesion toward the live centroid of cluster mates (resize-safe)
+    // diagonal. `drift` is the user's "node movement" dial (0 in fixed mode).
+    n.vx += Math.cos(n.phase) * drift;
+    n.vy += Math.sin(n.phase * 0.7 + 1.3) * drift;
+    if (!fixed) {
+      n.vx += (rng() - 0.5) * 0.02; // a touch of noise so the wander isn't perfectly periodic
+      n.vy += (rng() - 0.5) * 0.02;
+    }
+    // cohesion (the "gravity" dial) toward the live centroid of cluster mates (resize-safe)
     const mates = nodes.filter((m) => m.cluster === n.cluster && m.id !== n.id);
     if (mates.length) {
       const avgx = mates.reduce((s, m) => s + m.x, 0) / mates.length;
       const avgy = mates.reduce((s, m) => s + m.y, 0) / mates.length;
-      n.vx += (avgx - n.x) * 0.003;
-      n.vy += (avgy - n.y) * 0.003;
+      n.vx += (avgx - n.x) * cfg.gravity;
+      n.vy += (avgy - n.y) * cfg.gravity;
     }
-    // collision / repulsion
+    // collision / repulsion (the "node strength" dial)
     nodes.forEach((m) => {
       if (m.id === n.id) return;
       const dx = n.x - m.x;
@@ -63,12 +67,12 @@ export function stepSimulation(
       const minD = 22 + n.r + m.r;
       if (d2 < minD * minD && d2 > 0.01) {
         const d = Math.sqrt(d2);
-        n.vx += (dx / d) * (minD - d) * 0.12;
-        n.vy += (dy / d) * (minD - d) * 0.12;
+        n.vx += (dx / d) * (minD - d) * cfg.repulsion;
+        n.vy += (dy / d) * (minD - d) * cfg.repulsion;
       }
     });
-    n.vx *= 0.88;
-    n.vy *= 0.88;
+    n.vx *= damping;
+    n.vy *= damping;
     n.x += n.vx;
     n.y += n.vy;
     const pad = 30;

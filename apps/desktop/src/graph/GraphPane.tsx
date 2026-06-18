@@ -3,6 +3,8 @@ import type { Theme } from '../appearance/theme';
 import type { GraphData } from './types';
 import { buildMockGraph } from './mockGraph';
 import { resolveGraphTheme } from './themeColors';
+import { loadConfig, saveConfig, type GraphConfig } from './config';
+import { GraphConfigPanel } from './GraphConfigPanel';
 import { GraphRenderer } from './GraphRenderer';
 import type { GraphRendererLike } from './Renderer';
 import { WebGpuGraphRenderer } from './webgpu/WebGpuGraphRenderer';
@@ -55,6 +57,12 @@ export function GraphPane({
   // the build effect (which would needlessly tear down + reshuffle the mock layout).
   const gpuAvailableRef = useRef(gpuAvailable);
   gpuAvailableRef.current = gpuAvailable;
+
+  // v2.0 user-tunable physics/colors (persisted). configRef lets build() apply the
+  // current config to a freshly-built renderer without re-running the build effect.
+  const [config, setConfig] = useState<GraphConfig>(() => loadConfig());
+  const configRef = useRef(config);
+  configRef.current = config;
 
   // Probe WebGPU once (adapter+device actually obtainable), not just navigator.gpu.
   useEffect(() => {
@@ -117,6 +125,7 @@ export function GraphPane({
       const s = sizeCanvas(); // honor any resize that landed during the async build
       r.setSize(s.w, s.h, s.dpr);
       r.setFocus(scopeRef.current === 'focus' ? (activePathRef.current ?? null) : null); // re-apply focus after a rebuild
+      r.setConfig(configRef.current); // re-apply the user's physics to the fresh renderer
       r.start();
     };
 
@@ -144,6 +153,25 @@ export function GraphPane({
   useEffect(() => {
     rendererRef.current?.setTheme(resolveGraphTheme());
   }, [theme]);
+
+  // v2.0: persist config + push the physics to the live renderer when the user tunes it.
+  useEffect(() => {
+    saveConfig(config);
+    rendererRef.current?.setConfig(config);
+  }, [config]);
+
+  // v2.0: apply per-cluster color overrides to the token layer (so BOTH renderers pick
+  // them up via resolveGraphTheme), or clear them back to the theme default. Keyed on the
+  // joined colors so it only runs when a swatch actually changes.
+  useEffect(() => {
+    const root = document.documentElement;
+    config.clusterColors.forEach((c, i) => {
+      if (c) root.style.setProperty(`--cluster-${i}`, c);
+      else root.style.removeProperty(`--cluster-${i}`);
+    });
+    rendererRef.current?.setTheme(resolveGraphTheme());
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key on the color values, not the array identity
+  }, [config.clusterColors.join('|')]);
 
   // Local-graph focus: dim everything but the open note + its neighbours (or clear it).
   useEffect(() => {
@@ -299,6 +327,7 @@ export function GraphPane({
       {/* key by backend: toggling remounts a FRESH canvas so the 2D fallback never
           inherits a canvas already committed to 'webgpu' (getContext('2d') → null). */}
       <canvas key={gpuOn ? 'gpu' : '2d'} ref={canvasRef} className="graph-canvas" />
+      <GraphConfigPanel config={config} onChange={setConfig} />
       <div className="graph-fade" />
     </div>
   );
