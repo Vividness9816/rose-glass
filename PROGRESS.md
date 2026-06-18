@@ -10,6 +10,19 @@ Local-first PKM + live Claude Code activity mirror (Tauri 2 + React 19 + TS-stri
 - `docs/design-reference.html` — the **visual contract** (match it, don't approximate)
 - ADR: `~/.claude/second-brain/decisions/ADR-20260616-rose-glass-execution-strategy.md` (foundation-first; no fake "verified")
 
+## Post-eyeball polish round (2026-06-17) — from live user feedback
+After the user live-verified Phases 4/8/9 + the backdrop, a feedback-driven polish/feature
+pass shipped (all gated green per commit; `/impeccable` methodology for the visual items):
+- `32b5c50` graph idle-drift (continuous breathe) · theme node bullseye inversion (`--graph-node-invert`) · removed the liquid-glass lens + dep · window-control glyphs (×−+ hover) · Search-rail→⌘K
+- `c13fe1a` **fix**: watcher trusts file-existence over event-kind → atomic-save rename no longer read as delete (the "docx sibling closes mid-edit" bug; latent for all autosaves)
+- `235e3a4` Focus → local-graph scope (dim all but the open note + its links; renderer `setFocus`)
+- `d40ed5e` session persistence (resume vault+note+view; theme via initTheme)
+- `dfb3754` terminal keep-alive on hide + tabs (+/×)
+- `96ed013` built the six dead buttons: Notes/Tags/Settings panes + Outline/Properties(frontmatter)/Share(copy-md); CommandPalette `initialQuery`; CodeMirrorHost exposes its EditorView
+- `b5dcc4e` titlebar + New note (create+open) + ↗ Share (reveal vault folder)
+- `e829835` **M2 arming**: `installer.rs` arm/disarm (re-validate → backup → atomic write) + Settings Arm/Disarm/Dry-run; live arm = the user's in-app confirm
+**Remaining:** GPU shader parity (auras/particles/curves/rings in WGSL — user-deprioritized last); the live app-window eyeball of the above + the in-app M2 arm.
+
 ## Done — built · reviewed · verified · pushed
 - **Council → ADR** (foundation-first staged execution; the spec's literal 1-shot is unverifiable in one session).
 - **Phase 0** — pnpm workspace + Tauri 2 boots + `tokens.css` verbatim from the mockup + live dark/light theme + self-hosted Inter/JetBrains Mono.
