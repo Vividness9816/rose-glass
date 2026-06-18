@@ -14,11 +14,14 @@
      • ribbon — CPU-tessellated triangle ribbons (see ribbon.ts, unit-tested) for
        the curved edges / trails / slime / arrowheads (WebGPU has no curve
        primitive and line-list is a hardware-1px line).
+     • label  — a textured quad per hub sampling a lazily-built label atlas (the
+       hub names rasterized once via canvas-2D into one texture, see labelAtlas.ts;
+       white coverage tinted to the theme label colour in the fragment, so a theme
+       flip needs no atlas rebuild).
 
    Layout + interaction are identical to the 2D path (shared Camera / hitTest /
-   seedable stepSimulation). The ONE deliberate gap vs 2D is hub text LABELS —
-   text on WebGPU needs a glyph atlas, disproportionate for a node caption; the
-   2D path keeps labels and is the default. ponytail: labels-on-GPU deferred.
+   seedable stepSimulation), and the look is now at full parity (hub text labels
+   included).
 
    SAFETY (§17 / ADR-20260616): `create()` is the ONLY constructor and returns
    `null` on ANY init failure (no adapter/device, pipeline validation error, lost
@@ -35,13 +38,40 @@ import { nodeAtWorld } from '../hitTest';
 import { stepSimulation } from '../simulation';
 import { indexNodesByPath, lookupNodeByRel } from '../GraphRenderer';
 import { RIBBON_STRIDE, ribbonInto, sampleQuadratic, type RGB01, type Vec2 } from './ribbon';
+import { layoutLabelAtlas } from './labelAtlas';
 
 const GRAPH_BG_ALPHA = 0.4; // matches the canvas-2D path (lets the §21 backdrop bleed through)
 
 const SPRITE_STRIDE = 9; // cx,cy, radius, r,g,b, alpha, soft, screen
 const RING_STRIDE = 8; //   cx,cy, radius, width, r,g,b, alpha
+const LABEL_STRIDE = 9; //  cx,cy, halfW,halfH, uvOffX,uvOffY, uvScaleX,uvScaleY, dim
 const SEG_EDGE = 12; // bezier segments per edge ribbon
 const SEG_SLIME = 5; // bezier segments per slime ribbon
+const LABEL_FONT_PX = 10; // matches the 2D hub label `bold 10px Inter`
+// ponytail: 4× supersample. The atlas is rasterized ONCE (not per-zoom like the 2D
+// fillText), so labels are crisp at typical zoom and soften only past ~4× magnification —
+// a deliberate trade (a cheap static atlas vs per-frame text). Raise for more zoom headroom.
+const LABEL_SCALE = 4;
+const LABEL_GAP = 6; // world-px gap below the node (tuned to the 2D baseline placement)
+const LABEL_ALPHA = 0.85; // matches the 2D `rgba(theme.label, 0.85)`
+
+/** GPU handles for the hub-label pass, created once in create() (under the error scope).
+    The atlas TEXTURE + its bind group are built lazily (they need runtime canvas text
+    measurement) and live as mutable fields. */
+interface LabelGpu {
+  pipeline: GPURenderPipeline;
+  bgl: GPUBindGroupLayout;
+  sampler: GPUSampler;
+  colUB: GPUBuffer;
+  vb: GPUBuffer;
+}
+
+interface LabelMeta {
+  uvOff: [number, number];
+  uvScale: [number, number];
+  worldW: number;
+  worldH: number;
+}
 
 interface Particle {
   e: GraphEdge;
@@ -150,6 +180,32 @@ fn vs_ribbon(@location(0) wp: vec2<f32>, @location(1) col: vec3<f32>, @location(
 fn fs_ribbon(@location(0) col: vec3<f32>, @location(1) alpha: f32) -> @location(0) vec4<f32> {
   return vec4<f32>(col * alpha, alpha);
 }
+
+// ── label: a textured quad per hub, sampling the (white-coverage) label atlas and
+//    tinting to the theme label colour. The atlas is theme-independent (coverage only),
+//    so a theme flip only rewrites labelCol — no atlas rebuild. ──
+struct LabelOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32>, @location(1) dim: f32 };
+@vertex
+fn vs_label(
+  @location(0) corner: vec2<f32>, @location(1) center: vec2<f32>, @location(2) half: vec2<f32>,
+  @location(3) uvOff: vec2<f32>, @location(4) uvScale: vec2<f32>, @location(5) dim: f32,
+) -> LabelOut {
+  var o: LabelOut;
+  o.pos = vec4<f32>(worldToClip(center + corner * half), 0.0, 1.0);
+  o.uv = uvOff + (corner * 0.5 + vec2<f32>(0.5, 0.5)) * uvScale;
+  o.dim = dim;
+  return o;
+}
+@group(0) @binding(1) var atlasTex: texture_2d<f32>;
+@group(0) @binding(2) var atlasSamp: sampler;
+@group(0) @binding(3) var<uniform> labelCol: vec4<f32>;  // rgb = theme label, a = master alpha
+@fragment
+fn fs_label(@location(0) uv: vec2<f32>, @location(1) dim: f32) -> @location(0) vec4<f32> {
+  let cov = textureSample(atlasTex, atlasSamp, uv).a;   // glyph coverage (white, premultiplied)
+  let a = cov * labelCol.a * dim;                         // × focus dim (matches 2D nodeAlpha)
+  if (a <= 0.0) { discard; }
+  return vec4<f32>(labelCol.rgb * a, a);                  // premultiplied, tinted
+}
 `;
 
 type DrawOp = { p: 'sprite' | 'ring' | 'ribbon'; first: number; count: number };
@@ -177,6 +233,13 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
   private spriteCap: number;
   private ringCap: number;
   private slimeMax: number; // cached cap on faint O(n²) slime ribbons (computed once)
+  // hub labels (lazily-built atlas; the GPU handles arrive via `label`)
+  private labelData: Float32Array;
+  private labelCap: number;
+  private labelBuilt = false; // build the atlas once on the first frame
+  private atlasTex: GPUTexture | null = null;
+  private labelBind: GPUBindGroup | null = null;
+  private labelMeta = new Map<string, LabelMeta>();
 
   private constructor(
     canvas: HTMLCanvasElement,
@@ -194,6 +257,7 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
     private spriteVB: GPUBuffer,
     private ringVB: GPUBuffer,
     private ribbonVB: GPUBuffer,
+    private label: LabelGpu,
     private onLost: (() => void) | undefined,
   ) {
     this.theme = theme;
@@ -212,6 +276,8 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
     this.spriteData = new Float32Array(Math.max(1, c.spriteCap) * SPRITE_STRIDE);
     this.ringData = new Float32Array(Math.max(1, c.ringCap) * RING_STRIDE);
     this.ribbonData = new Float32Array(Math.max(1, c.ribbonVertCap) * RIBBON_STRIDE);
+    this.labelCap = data.nodes.filter((n) => n.hub).length;
+    this.labelData = new Float32Array(Math.max(1, this.labelCap) * LABEL_STRIDE);
     // External device loss (GPU reset / TDR) → fall back to canvas-2D. Registered here
     // (not in create()) so it shares the one-shot `lostFired` with the frame() catch path;
     // our own teardown (reason 'destroyed') is ignored.
@@ -341,6 +407,40 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
         fragment: { module, entryPoint: 'fs_ribbon', targets: [{ format, blend }] },
         primitive: { topology: 'triangle-list' },
       });
+      // label: textured quad (cam + atlas texture + sampler + tint uniform)
+      const labelBgl = device.createBindGroupLayout({
+        entries: [
+          { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
+          { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+          { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+          { binding: 3, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+        ],
+      });
+      const labelPipeline = device.createRenderPipeline({
+        layout: device.createPipelineLayout({ bindGroupLayouts: [labelBgl] }),
+        vertex: {
+          module,
+          entryPoint: 'vs_label',
+          buffers: [
+            quadLayout,
+            {
+              arrayStride: LABEL_STRIDE * 4,
+              stepMode: 'instance',
+              attributes: [
+                { shaderLocation: 1, offset: 0, format: 'float32x2' }, // center
+                { shaderLocation: 2, offset: 8, format: 'float32x2' }, // half-extent
+                { shaderLocation: 3, offset: 16, format: 'float32x2' }, // uv offset
+                { shaderLocation: 4, offset: 24, format: 'float32x2' }, // uv scale
+                { shaderLocation: 5, offset: 32, format: 'float32' }, // focus dim
+              ],
+            },
+          ],
+        },
+        fragment: { module, entryPoint: 'fs_label', targets: [{ format, blend }] },
+        primitive: { topology: 'triangle-strip' },
+      });
+      const labelSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+      const labelColUB = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
       const camUB = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
       const camBind = device.createBindGroup({ layout: bgl, entries: [{ binding: 0, resource: { buffer: camUB } }] });
       const quad = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
@@ -362,6 +462,7 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
       const spriteVB = mk(c.spriteCap * SPRITE_STRIDE);
       const ringVB = mk(c.ringCap * RING_STRIDE);
       const ribbonVB = mk(c.ribbonVertCap * RIBBON_STRIDE);
+      const labelVB = mk(Math.max(1, data.nodes.filter((n) => n.hub).length) * LABEL_STRIDE);
 
       const vErr = await device.popErrorScope(); // validation (LIFO: inner scope first)
       const oErr = await device.popErrorScope(); // out-of-memory
@@ -370,10 +471,11 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
         return null;
       }
 
+      const label: LabelGpu = { pipeline: labelPipeline, bgl: labelBgl, sampler: labelSampler, colUB: labelColUB, vb: labelVB };
       return new WebGpuGraphRenderer(
         canvas, data, theme, dpr, device, ctx,
         spritePipeline, ringPipeline, ribbonPipeline,
-        camUB, camBind, quadVB, spriteVB, ringVB, ribbonVB, onLost,
+        camUB, camBind, quadVB, spriteVB, ringVB, ribbonVB, label, onLost,
       );
     } catch {
       try {
@@ -460,17 +562,96 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
   stop() {
     this.running = false;
     cancelAnimationFrame(this.raf);
-    // Release GPU resources — GraphPane discards + rebuilds on teardown/toggle, so a
-    // non-destroying stop would leak a device per toggle.
+    // Release GPU resources — GraphPane discards + rebuilds on teardown/toggle (the instance
+    // is single-use; it is never start()ed again after stop()), so a non-destroying stop would
+    // leak a device per toggle. We destroy the buffers + atlas texture explicitly; the sampler /
+    // bind-group(-layout) / pipeline / texture-view have no destroy() in WebGPU and are reclaimed
+    // by device.destroy() below.
     try {
       this.spriteVB.destroy();
       this.ringVB.destroy();
       this.ribbonVB.destroy();
       this.quadVB.destroy();
       this.camUB.destroy();
+      this.label.vb.destroy();
+      this.label.colUB.destroy();
+      this.atlasTex?.destroy();
       this.device.destroy();
     } catch {
       /* already released / context lost */
+    }
+  }
+
+  /** True once the bold Inter face is loaded (or the Font Loading API is unavailable), so
+      the atlas isn't rasterized in a fallback font on the very first frame. */
+  private fontReady(): boolean {
+    try {
+      return !document.fonts || document.fonts.check(`bold ${LABEL_FONT_PX * LABEL_SCALE}px Inter`);
+    } catch {
+      return true;
+    }
+  }
+
+  /** Rasterize the hub label strings into ONE atlas texture (white coverage on
+      transparent, tinted in the fragment) and cache each label's UV rect + world size.
+      Built once on the first frame (the hub set is static per renderer instance).
+      BEST-EFFORT + non-fatal: empty names are dropped, and if the packed atlas would
+      exceed the device texture limit it is SKIPPED (labels just don't show) rather than
+      built as an invalid texture — WebGPU surfaces such errors asynchronously, so they
+      would otherwise escape frame()'s catch and spew per-frame validation errors. The
+      graph keeps rendering on the GPU either way. */
+  private buildLabelAtlas() {
+    this.labelBuilt = true;
+    const labels = [
+      ...new Set(this.data.nodes.filter((n) => n.hub).map((n) => n.name).filter((s) => s.trim().length > 0)),
+    ];
+    if (!labels.length) return;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const font = `bold ${LABEL_FONT_PX * LABEL_SCALE}px Inter, sans-serif`;
+    ctx.font = font;
+    const lineH = Math.ceil(LABEL_FONT_PX * LABEL_SCALE * 1.4);
+    const metrics = labels.map((text) => ({ text, w: Math.ceil(ctx.measureText(text).width) + 2, h: lineH }));
+    const { atlasW, atlasH, rects } = layoutLabelAtlas(metrics, 2048, 2);
+    // Skip rather than build an over-limit (invalid) texture — the failure would surface
+    // asynchronously, past frame()'s try/catch. Labels are optional; the graph is unaffected.
+    const maxDim = this.device.limits.maxTextureDimension2D;
+    if (atlasW > maxDim || atlasH > maxDim) return;
+    canvas.width = atlasW;
+    canvas.height = atlasH;
+    ctx.font = font; // resizing the canvas resets the 2D context — re-apply
+    ctx.fillStyle = '#fff';
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    for (const r of rects) ctx.fillText(r.text, r.x, r.y);
+
+    const tex = this.device.createTexture({
+      size: [atlasW, atlasH],
+      format: 'rgba8unorm',
+      usage:
+        GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    this.device.queue.copyExternalImageToTexture({ source: canvas }, { texture: tex, premultipliedAlpha: true }, [atlasW, atlasH]);
+    this.atlasTex?.destroy();
+    this.atlasTex = tex;
+    this.labelBind = this.device.createBindGroup({
+      layout: this.label.bgl,
+      entries: [
+        { binding: 0, resource: { buffer: this.camUB } },
+        { binding: 1, resource: tex.createView() },
+        { binding: 2, resource: this.label.sampler },
+        { binding: 3, resource: { buffer: this.label.colUB } },
+      ],
+    });
+    this.labelMeta.clear();
+    for (const r of rects) {
+      this.labelMeta.set(r.text, {
+        uvOff: [r.x / atlasW, r.y / atlasH],
+        uvScale: [r.w / atlasW, r.h / atlasH],
+        worldW: r.w / LABEL_SCALE,
+        worldH: r.h / LABEL_SCALE,
+      });
     }
   }
 
@@ -743,16 +924,54 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
     // ALL GPU work is guarded: an external device loss surfaces here as a throw
     // (e.g. getCurrentTexture) → stop + onLost → GraphPane rebuilds on canvas-2D.
     try {
+      // Build the atlas once Inter is actually loaded, so labels rasterize in Inter
+      // (not a fallback) — the self-hosted font may still be loading on the first frame.
+      // Non-fatal: a label-build failure must never tear down the whole GPU renderer
+      // (labels are optional decoration), so it is swallowed here, not propagated to the catch.
+      if (!this.labelBuilt && this.fontReady()) {
+        try {
+          this.buildLabelAtlas();
+        } catch {
+          /* labels optional — keep rendering the graph on the GPU without them */
+        }
+      }
       this.device.queue.writeBuffer(
         this.camUB,
         0,
         new Float32Array([this.camera.zoom, this.camera.tx, this.camera.ty, 0, this.W, this.H, 0, 0]),
       );
+      // label tint = theme label colour × master alpha (cheap; a theme flip needs no atlas rebuild)
+      const lc = this.theme.label;
+      this.device.queue.writeBuffer(this.label.colUB, 0, new Float32Array([lc[0] / 255, lc[1] / 255, lc[2] / 255, LABEL_ALPHA]));
 
       const { ops, spriteN, ringN, ribbonF } = this.buildScene();
       if (spriteN) this.device.queue.writeBuffer(this.spriteVB, 0, this.spriteData, 0, spriteN * SPRITE_STRIDE);
       if (ringN) this.device.queue.writeBuffer(this.ringVB, 0, this.ringData, 0, ringN * RING_STRIDE);
       if (ribbonF) this.device.queue.writeBuffer(this.ribbonVB, 0, this.ribbonData, 0, ribbonF);
+
+      // hub label instances: world position under each hub + its atlas UV rect + focus dim.
+      let labelN = 0;
+      if (this.atlasTex && this.labelBind) {
+        const ld = this.labelData;
+        for (const n of this.data.nodes) {
+          if (!n.hub || labelN >= this.labelCap) continue;
+          const meta = this.labelMeta.get(n.name);
+          if (!meta) continue;
+          const hh = meta.worldH / 2;
+          const o = labelN * LABEL_STRIDE;
+          ld[o] = n.x;
+          ld[o + 1] = n.y + n.r + LABEL_GAP + hh; // top of the label sits LABEL_GAP below the node
+          ld[o + 2] = meta.worldW / 2;
+          ld[o + 3] = hh;
+          ld[o + 4] = meta.uvOff[0];
+          ld[o + 5] = meta.uvOff[1];
+          ld[o + 6] = meta.uvScale[0];
+          ld[o + 7] = meta.uvScale[1];
+          ld[o + 8] = this.nodeFocusA(n.id);
+          labelN++;
+        }
+        if (labelN) this.device.queue.writeBuffer(this.label.vb, 0, ld, 0, labelN * LABEL_STRIDE);
+      }
 
       const view = this.ctx.getCurrentTexture().createView();
       const bg = this.theme.bgRgb;
@@ -785,6 +1004,14 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
           pass.setVertexBuffer(0, this.ribbonVB);
           pass.draw(op.count, 1, op.first, 0);
         }
+      }
+      // hub labels last (on top of the graph), with their own bind group (atlas + tint)
+      if (labelN && this.labelBind) {
+        pass.setPipeline(this.label.pipeline);
+        pass.setBindGroup(0, this.labelBind);
+        pass.setVertexBuffer(0, this.quadVB);
+        pass.setVertexBuffer(1, this.label.vb);
+        pass.draw(4, labelN, 0, 0);
       }
       pass.end();
       this.device.queue.submit([enc.finish()]);

@@ -31,7 +31,13 @@ terminal/properties live render) are code-complete + compile-verified — the li
   look via 3 instanced pipelines (sprite/ring/ribbon) — cluster auras/glow, curved edges + arrowheads +
   trails, tributary particles, hub rings + orbiting dots — and the **Focus dimming** + **theme bullseye
   inversion** ports. Riskiest-premise spike first (`ribbon.ts`, 8/8). 3-lens reviewed (7 LOW, all fixed).
-  GPU-verified dark+light on the RTX 5090 (`docs/proof/phase4-parity-*.png`). Only hub text labels stay 2D.
+  GPU-verified dark+light on the RTX 5090 (`docs/proof/phase4-parity-*.png`).
+- ✅ **GPU hub LABELS DONE** (Ph4, 2026-06-18): the last parity gap closed — a 4th `label` pipeline draws
+  each hub name as a textured quad sampling a lazily-built label-atlas texture (`labelAtlas.ts` pure-packed +
+  6/6 tested; white coverage tinted to the theme label colour so a theme flip needs no atlas rebuild). 3-lens
+  reviewed (1 MED + 8 LOW; over-limit atlas now skips vs building an invalid texture — WebGPU errors are async).
+  GPU-verified legible under each hub in dark + light on the 5090. **GPU is now at full visual parity** (one
+  honest residual: static 4× supersample → labels soften past ~4× zoom).
 - ✅ **Focus doesn't dim** — root cause was the **GPU no-op path** (`setFocus` was a no-op on the GPU
   renderer; the user had GPU toggled on). Ported to GPU (commit `7fd4ae9`). The 2D path is correct —
   verified by tracing: `indexer/pipeline.rs` normalizes all DB paths to `/`, so `note.path` (get_note) ≡
