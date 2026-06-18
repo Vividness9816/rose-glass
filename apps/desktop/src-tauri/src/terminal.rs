@@ -13,6 +13,7 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
 
 /// One live PTY session: the master (for resize), the writer (for keystrokes; behind
@@ -23,6 +24,36 @@ struct Session {
     master: Box<dyn MasterPty + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
+    /// v2.0: bytes the reader produced before the UI attached its listener (a capped ring).
+    /// `pty_attach` drains it + switches to live emit — fixes the first-prompt race.
+    buffer: Arc<Mutex<PtyBuffer>>,
+}
+
+/// Pre-attach output buffer. Until the UI calls `pty_attach`, the reader appends here
+/// (keeping the most-recent `RING_CAP` bytes); after attach (or a 5s TTL fallback) the
+/// reader emits live. Emits are done while HOLDING this lock so the flushed buffer can
+/// never arrive after a later live chunk (strict ordering).
+#[derive(Default)]
+struct PtyBuffer {
+    pending: Vec<u8>,
+    attached: bool,
+}
+
+/// Pre-attach ring cap: a prompt + banner fits easily; we only need what's on screen
+/// before the listener wires up, not full scrollback.
+const RING_CAP: usize = 4096;
+
+/// If the UI never attaches (crash / abandoned spawn), stop buffering after this and emit
+/// live so output isn't held hostage (events with no listener drop harmlessly).
+const ATTACH_TTL: Duration = Duration::from_secs(5);
+
+/// Append `chunk`, keeping only the most-recent `cap` bytes. Pure → unit-tested.
+fn push_capped(buf: &mut Vec<u8>, chunk: &[u8], cap: usize) {
+    buf.extend_from_slice(chunk);
+    if buf.len() > cap {
+        let excess = buf.len() - cap;
+        buf.drain(..excess);
+    }
 }
 
 #[derive(Default)]
@@ -86,25 +117,32 @@ pub fn pty_spawn(
     let id = reg.next_id.fetch_add(1, Ordering::Relaxed);
     let sessions = Arc::clone(&reg.sessions); // reader thread evicts the session on exit
 
-    // Reader thread: stream raw bytes to the UI, then signal exit. Binary-safe (Vec<u8>)
-    // so escape sequences / multibyte UTF-8 split across reads stay intact.
-    // ponytail: a small race exists between spawn returning and the UI attaching its
-    // listener; the first prompt bytes can be missed. Press Enter for a fresh prompt.
-    // Upgrade: buffer-until-attached if it bites.
+    // Reader thread: BUFFER raw bytes until the UI attaches (fixes the first-prompt race),
+    // then stream live. Binary-safe (Vec<u8>) so escape sequences / multibyte UTF-8 split
+    // across reads stay intact. Every emit happens under the buffer lock so the flushed
+    // pre-attach buffer can never land after a later live chunk.
     let app2 = app.clone();
+    let buffer = Arc::new(Mutex::new(PtyBuffer::default()));
+    let reader_buf = Arc::clone(&buffer);
+    let spawned = Instant::now();
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    let _ = app2.emit(
-                        "pty:output",
-                        OutputEvent {
-                            id,
-                            data: buf[..n].to_vec(),
-                        },
-                    );
+                    let mut b = lock(&reader_buf);
+                    if b.attached {
+                        let _ = app2.emit("pty:output", OutputEvent { id, data: buf[..n].to_vec() });
+                    } else if spawned.elapsed() > ATTACH_TTL {
+                        // TTL fallback: flush what we have + this chunk, then go live.
+                        b.attached = true;
+                        let mut drained = std::mem::take(&mut b.pending);
+                        drained.extend_from_slice(&buf[..n]);
+                        let _ = app2.emit("pty:output", OutputEvent { id, data: drained });
+                    } else {
+                        push_capped(&mut b.pending, &buf[..n], RING_CAP);
+                    }
                 }
                 Err(_) => break,
             }
@@ -120,6 +158,7 @@ pub fn pty_spawn(
             master: pair.master,
             writer,
             killer,
+            buffer,
         },
     );
     Ok(id)
@@ -167,10 +206,46 @@ pub fn pty_kill(reg: State<'_, TerminalRegistry>, id: u32) -> Result<(), String>
     Ok(())
 }
 
+/// v2.0: the UI calls this AFTER wiring its `pty:output` listener. Flushes the bytes the
+/// reader buffered before the listener existed (as one ordered `pty:output` event) and
+/// switches the session to live emit — closing the first-prompt race. The flush runs under
+/// the buffer lock so it precedes any later live chunk. Idempotent / no-op if already live.
+#[tauri::command]
+pub fn pty_attach(app: AppHandle, reg: State<'_, TerminalRegistry>, id: u32) -> Result<(), String> {
+    let buffer = {
+        let sessions = lock(&reg.sessions);
+        Arc::clone(&sessions.get(&id).ok_or("no such terminal")?.buffer)
+    };
+    let mut b = lock(&buffer);
+    if b.attached {
+        return Ok(()); // already live (e.g. the TTL fired first) — nothing buffered to flush
+    }
+    let pending = std::mem::take(&mut b.pending);
+    b.attached = true;
+    if !pending.is_empty() {
+        let _ = app.emit("pty:output", OutputEvent { id, data: pending });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Read;
+
+    #[test]
+    fn ring_buffer_keeps_most_recent_bytes() {
+        let mut b = Vec::new();
+        push_capped(&mut b, b"hello", 4);
+        assert_eq!(b, b"ello", "over cap → keep the last 4");
+        push_capped(&mut b, b"XY", 4);
+        assert_eq!(b, b"loXY", "still the last 4 across calls");
+        let mut c = Vec::new();
+        push_capped(&mut c, b"ab", 8);
+        assert_eq!(c, b"ab", "under cap → untouched");
+        push_capped(&mut c, b"cdef", 8);
+        assert_eq!(c, b"abcdef", "exactly at/under cap → kept whole");
+    }
 
     #[test]
     fn resolve_cwd_prefers_explicit_then_vault() {

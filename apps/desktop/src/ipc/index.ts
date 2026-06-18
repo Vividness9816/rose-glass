@@ -162,6 +162,10 @@ export const ptyWrite = (id: number, data: string) => invoke<void>('pty_write', 
 export const ptyResize = (id: number, cols: number, rows: number) =>
   invoke<void>('pty_resize', { id, cols, rows });
 export const ptyKill = (id: number) => invoke<void>('pty_kill', { id });
+/** v2.0: call AFTER wiring the pty:output listener — flushes bytes the reader buffered
+ *  pre-attach (as one ordered pty:output event) and switches the session to live emit,
+ *  closing the first-prompt race. */
+export const ptyAttach = (id: number) => invoke<void>('pty_attach', { id });
 
 export const onPtyOutput = (id: number, cb: (data: Uint8Array) => void): Promise<UnlistenFn> =>
   listen<{ id: number; data: number[] }>('pty:output', (e) => {

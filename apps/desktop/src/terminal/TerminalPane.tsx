@@ -14,6 +14,7 @@ import {
   inTauri,
   onPtyExit,
   onPtyOutput,
+  ptyAttach,
   ptyKill,
   ptyResize,
   ptySpawn,
@@ -102,6 +103,9 @@ export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention
           unExit();
           return;
         }
+        // v2.0: listeners are wired — drain the bytes the reader buffered pre-attach (the
+        // shell's first prompt/banner) and switch to live emit. Closes the first-prompt race.
+        await ptyAttach(id);
         term.onData((d) => {
           if (id >= 0 && !disposed) void ptyWrite(id, d);
         });
