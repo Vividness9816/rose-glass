@@ -34,6 +34,9 @@ import { Titlebar } from './Titlebar';
 import { IconRail } from './IconRail';
 import { EditorPane } from './EditorPane';
 import { StatusBar } from './StatusBar';
+import { NotesPane } from './NotesPane';
+import { TagsPane } from './TagsPane';
+import { SettingsPane } from './SettingsPane';
 import { loadSession, saveSession } from './session';
 import {
   activityStart,
@@ -50,6 +53,7 @@ import {
   openVault,
   readNoteFile,
   recomputeClusters,
+  reindex,
   resolveLink,
   saveNoteFile,
   type BacklinkDto,
@@ -70,6 +74,7 @@ export function Shell() {
   const [doc, setDoc] = useState('');
   const [binaryPath, setBinaryPath] = useState<string | null>(null); // Phase 9: open pdf/docx (not an indexed note)
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState<string | undefined>(undefined); // pre-fill (tag search)
   const [terminalOpen, setTerminalOpen] = useState(false); // is the terminal drawer VISIBLE
   const [terminals, setTerminals] = useState<number[]>([]); // open tab ids — each is a live PTY kept alive while hidden
   const [activeTerm, setActiveTerm] = useState(-1);
@@ -77,6 +82,7 @@ export function Shell() {
   const activeTermRef = useRef(activeTerm);
   activeTermRef.current = activeTerm;
   const [clustering, setClustering] = useState(false); // Phase 11 embed+cluster in progress
+  const [reindexing, setReindexing] = useState(false); // Settings: manual index rebuild in progress
   const [railView, setRailView] = useState('graph'); // which IconRail view; 'activity' swaps the right pane
   const [activity, setActivity] = useState<ActivityState>(emptyActivity); // Phase 8 ephemeral ring
   const [tailing, setTailing] = useState(false); // is the CC activity tail actually running
@@ -95,10 +101,25 @@ export function Shell() {
   const eolRef = useRef<Eol>('\n');
   const prevFocusRef = useRef<HTMLElement | null>(null);
 
-  const openPalette = useCallback(() => {
+  const openPalette = useCallback((query?: string) => {
     prevFocusRef.current = document.activeElement as HTMLElement | null;
+    setPaletteQuery(query);
     setPaletteOpen(true);
   }, []);
+  // Tags pane → search that tag in the palette.
+  const onTag = useCallback((tag: string) => openPalette(tag), [openPalette]);
+  // Settings → rebuild the derived index from disk (Markdown untouched).
+  const onReindex = useCallback(async () => {
+    if (reindexing || !inTauri()) return;
+    setReindexing(true);
+    try {
+      await reindex();
+    } catch (e) {
+      console.error('reindex failed:', e);
+    } finally {
+      setReindexing(false);
+    }
+  }, [reindexing]);
   const closePalette = useCallback(() => {
     setPaletteOpen(false);
     prevFocusRef.current?.focus?.(); // restore focus so keyboard nav isn't lost
@@ -456,7 +477,7 @@ export function Shell() {
     <div className="app-shell">
       <Titlebar
         vault={vault}
-        onSearch={openPalette}
+        onSearch={() => openPalette()}
         onOpenFile={() => void onOpenFile()}
         canOpenFile={graphData !== undefined}
       />
@@ -480,6 +501,25 @@ export function Shell() {
         />
         {railView === 'activity' ? (
           <ActivityPane state={activity} tailing={tailing} vaultOpen={graphData !== undefined} />
+        ) : railView === 'notes' ? (
+          <NotesPane
+            notes={(graphData?.nodes ?? []).map((n) => ({ path: n.path, title: n.name }))}
+            activePath={note?.path ?? null}
+            onOpen={(p) => {
+              setRailView('graph');
+              void openNote(p);
+            }}
+          />
+        ) : railView === 'tags' ? (
+          <TagsPane onTag={onTag} />
+        ) : railView === 'settings' ? (
+          <SettingsPane
+            theme={theme}
+            onToggleTheme={onToggleTheme}
+            vault={vault}
+            onReindex={() => void onReindex()}
+            reindexing={reindexing}
+          />
         ) : (
           <EditorPane
             note={note}
@@ -500,7 +540,9 @@ export function Shell() {
         theme={theme}
         onToggleTheme={onToggleTheme}
       />
-      {paletteOpen && <CommandPalette onClose={closePalette} onOpenNote={openNote} />}
+      {paletteOpen && (
+        <CommandPalette onClose={closePalette} onOpenNote={openNote} initialQuery={paletteQuery} />
+      )}
       {/* Once opened, the drawer stays MOUNTED so its PTYs keep running; Ctrl+` just
           hides it (display:none). Each tab is a keyed TerminalPane — only the active one
           shows, the rest stay alive hidden. The tab × unmounts → kills that PTY. */}

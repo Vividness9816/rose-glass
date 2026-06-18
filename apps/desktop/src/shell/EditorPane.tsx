@@ -4,10 +4,12 @@
    (PdfView / DocxView). The .docx "Edit as Markdown" action surfaces through
    onEditAsMarkdown (Phase 9 / ADR-20260617). */
 
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useRef, useState } from 'react';
+import { EditorView } from '@codemirror/view';
 import type { BacklinkDto, NoteDto } from '../ipc';
 import { CodeMirrorHost } from '../editor/CodeMirrorHost';
 import { editorKind } from '../editor/editorKind';
+import { parseOutline } from '../editor/outline';
 
 // Lazy-split the viewers so pdfjs/mammoth/dompurify stay OFF the critical path (the
 // project's three.js/ShaderBackdrop pattern) — loaded only when a binary is opened.
@@ -57,6 +59,31 @@ export function EditorPane({
   onWikiClick,
   onEditAsMarkdown,
 }: Props) {
+  // Editor-header tools (Outline / Properties / Share). Hooks run unconditionally,
+  // before the binary early-return below.
+  const editorViewRef = useRef<EditorView | null>(null);
+  const [panel, setPanel] = useState<'none' | 'outline' | 'properties'>('none');
+  const [copied, setCopied] = useState(false);
+
+  const scrollToLine = (line: number) => {
+    const view = editorViewRef.current;
+    if (!view) return;
+    const ln = Math.min(Math.max(1, line), view.state.doc.lines);
+    const pos = view.state.doc.line(ln).from;
+    view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: 'start' }) });
+    view.focus();
+    setPanel('none');
+  };
+  const onShare = async () => {
+    try {
+      await navigator.clipboard.writeText(doc);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable (denied / non-secure context) */
+    }
+  };
+
   // ── Binary (PDF/docx) view — not an indexed note ──
   if (binaryPath) {
     const kind = editorKind(binaryPath);
@@ -104,10 +131,67 @@ export function EditorPane({
       <div className="editor-header">
         <Breadcrumb path={segments} current={note?.title ?? 'No note open'} />
         <div className="editor-actions">
-          <button className="ea-btn" title="Outline" type="button">≡</button>
-          <button className="ea-btn" title="Properties" type="button">◈</button>
-          <button className="ea-btn" title="Share" type="button">↗</button>
+          <button
+            className={`ea-btn${panel === 'outline' ? ' active' : ''}`}
+            title="Outline"
+            type="button"
+            disabled={!note}
+            onClick={() => setPanel((p) => (p === 'outline' ? 'none' : 'outline'))}
+          >
+            ≡
+          </button>
+          <button
+            className={`ea-btn${panel === 'properties' ? ' active' : ''}`}
+            title="Properties"
+            type="button"
+            disabled={!note}
+            onClick={() => setPanel((p) => (p === 'properties' ? 'none' : 'properties'))}
+          >
+            ◈
+          </button>
+          <button
+            className={`ea-btn${copied ? ' active' : ''}`}
+            title={copied ? 'Copied!' : 'Copy as Markdown'}
+            type="button"
+            disabled={!note}
+            onClick={() => void onShare()}
+          >
+            ↗
+          </button>
         </div>
+        {panel === 'outline' && (
+          <div className="editor-popover" role="menu">
+            {parseOutline(doc).length === 0 ? (
+              <div className="ep-empty">No headings in this note.</div>
+            ) : (
+              parseOutline(doc).map((h) => (
+                <button
+                  key={`${h.line}-${h.text}`}
+                  type="button"
+                  className="ep-outline-row"
+                  style={{ paddingLeft: 12 + (h.level - 1) * 12 }}
+                  onClick={() => scrollToLine(h.line)}
+                >
+                  {h.text}
+                </button>
+              ))
+            )}
+          </div>
+        )}
+        {panel === 'properties' && (
+          <div className="editor-popover">
+            {fm && Object.keys(fm).length > 0 ? (
+              Object.entries(fm).map(([k, v]) => (
+                <div key={k} className="ep-row">
+                  <span className="ep-key">{k}</span>
+                  <span className="ep-val">{String(v)}</span>
+                </div>
+              ))
+            ) : (
+              <div className="ep-empty">No frontmatter properties.</div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="editor-body selectable">
@@ -127,6 +211,7 @@ export function EditorPane({
           notePath={note?.path ?? null}
           onChangeDoc={onChangeDoc}
           onWikiClick={onWikiClick}
+          editorViewRef={editorViewRef}
         />
 
         {backlinks.length > 0 && (

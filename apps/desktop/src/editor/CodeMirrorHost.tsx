@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { type MutableRefObject, useEffect, useLayoutEffect, useRef } from 'react';
 import { Annotation, Compartment, EditorState, Transaction } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
@@ -20,11 +20,20 @@ interface Props {
   onChangeDoc: (doc: string) => void;
   onWikiClick: (target: string) => void;
   className?: string;
+  /** Optional: receives the live EditorView so chrome (e.g. the Outline) can scroll it. */
+  editorViewRef?: MutableRefObject<EditorView | null>;
 }
 
 /** Imperative CodeMirror 6 host. React owns only the mount <div>; the EditorView
  *  is created once (StrictMode-safe) and its doc swapped via transactions. */
-export function CodeMirrorHost({ doc, notePath, onChangeDoc, onWikiClick, className }: Props) {
+export function CodeMirrorHost({
+  doc,
+  notePath,
+  onChangeDoc,
+  onWikiClick,
+  className,
+  editorViewRef,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChangeDoc);
@@ -62,10 +71,14 @@ export function CodeMirrorHost({ doc, notePath, onChangeDoc, onWikiClick, classN
       parent: hostRef.current,
     });
     viewRef.current = view;
+    if (editorViewRef) editorViewRef.current = view;
     return () => {
       view.destroy();
       viewRef.current = null;
+      if (editorViewRef) editorViewRef.current = null;
     };
+    // editorViewRef is a stable ref container; the editor is created once (StrictMode-safe)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // swap the document when the open note changes (or an external reload sets a new

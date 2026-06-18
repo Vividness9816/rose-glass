@@ -1,0 +1,146 @@
+/* Shared shell for the rail side-panes (Notes / Tags / Settings). Token-driven; matches
+   the editor/activity pane vocabulary so the right rail reads as one consistent surface. */
+
+.side-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.sp-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  flex-shrink: 0;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-mid);
+}
+.sp-glyph {
+  color: var(--rose);
+  font-size: 14px;
+}
+.sp-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.sp-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.sp-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sp-empty {
+  padding: 28px 18px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.sp-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  text-align: left;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: default;
+  transition: background var(--dur-fast) var(--ease);
+}
+.sp-row:hover {
+  background: var(--surface-2);
+}
+.sp-row.active {
+  background: var(--rose-glow-sm);
+  border-color: var(--border-mid);
+}
+.sp-row-title {
+  font-size: 13px;
+  color: var(--text-1);
+}
+.sp-row-sub {
+  max-width: 100%;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-tag-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.sp-tag {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--violet-bright);
+}
+.sp-tag-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.sp-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.sp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sp-field-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.sp-field-value {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+  word-break: break-all;
+}
+.sp-btn {
+  align-self: flex-start;
+  font-size: 12px;
+  color: var(--rose-bright);
+  background: var(--rose-glow-sm);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 6px 12px;
+  cursor: default;
+  transition: background var(--dur-fast) var(--ease);
+}
+.sp-btn:hover:not(:disabled) {
+  background: var(--rose-glow);
+}
+.sp-btn:disabled {
+  opacity: 0.5;
+}

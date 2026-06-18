@@ -6,14 +6,16 @@ import './palette.css';
 interface Props {
   onClose: () => void;
   onOpenNote: (path: string) => void;
+  /** Pre-fill the search (e.g. opened from a tag) — the debounced search runs on it. */
+  initialQuery?: string;
 }
 
 const stripHighlight = (s: string) => s.replace(/<\/?b>/g, '');
 
 /** ⌘K command palette — debounced FTS search; ↑↓ to move, Enter to open, Esc to
  *  close. Renders the mockup's glass palette. */
-export function CommandPalette({ onClose, onOpenNote }: Props) {
-  const [query, setQuery] = useState('');
+export function CommandPalette({ onClose, onOpenNote, initialQuery }: Props) {
+  const [query, setQuery] = useState(initialQuery ?? '');
   const [results, setResults] = useState<SearchHit[]>([]);
   const [focus, setFocus] = useState(0);
   const [loading, setLoading] = useState(false);
