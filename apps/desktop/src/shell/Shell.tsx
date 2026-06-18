@@ -367,6 +367,34 @@ export function Shell() {
     }
   }, [openVaultByPath]);
 
+  // Titlebar "+ New note": create a non-colliding Untitled note at the vault root and open it.
+  const onNewNote = useCallback(async () => {
+    if (!inTauri() || !vaultRootRef.current) return;
+    const existing = new Set((graphData?.nodes ?? []).map((n) => n.path.toLowerCase()));
+    let name = 'Untitled.md';
+    for (let i = 2; existing.has(name.toLowerCase()); i++) name = `Untitled ${i}.md`;
+    try {
+      await saveNoteFile(name, '# Untitled\n\n');
+      setRailView('graph');
+      await openNote(name);
+    } catch (e) {
+      console.error('new note failed:', e);
+    }
+  }, [graphData, openNote]);
+
+  // Titlebar "↗ Share": reveal the vault folder in the OS file explorer (export affordance,
+  // distinct from the editor-header note-level Copy-as-Markdown).
+  const onRevealVault = useCallback(async () => {
+    const root = vaultRootRef.current;
+    if (!root || !inTauri()) return;
+    try {
+      const { openPath } = await import('@tauri-apps/plugin-opener');
+      await openPath(root);
+    } catch (e) {
+      console.error('reveal vault failed:', e);
+    }
+  }, []);
+
   useEffect(() => {
     if (!inTauri()) return;
     let unNote: (() => void) | undefined;
@@ -479,6 +507,8 @@ export function Shell() {
         vault={vault}
         onSearch={() => openPalette()}
         onOpenFile={() => void onOpenFile()}
+        onShare={() => void onRevealVault()}
+        onNewNote={() => void onNewNote()}
         canOpenFile={graphData !== undefined}
       />
       <IconRail

@@ -17,11 +17,15 @@ export function Titlebar({
   vault,
   onSearch,
   onOpenFile,
+  onShare,
+  onNewNote,
   canOpenFile = true,
 }: {
   vault: string;
   onSearch?: () => void;
   onOpenFile?: () => void;
+  onShare?: () => void;
+  onNewNote?: () => void;
   canOpenFile?: boolean;
 }) {
   return (
@@ -67,7 +71,24 @@ export function Titlebar({
         >
           ⎘ Open file
         </button>
-        <button className="tb-btn primary" type="button">+ New note</button>
+        <button
+          className="tb-btn"
+          type="button"
+          onClick={onShare}
+          disabled={!canOpenFile}
+          title={canOpenFile ? 'Reveal the vault folder in your file explorer' : 'Open a vault first'}
+        >
+          ↗ Share
+        </button>
+        <button
+          className="tb-btn primary"
+          type="button"
+          onClick={onNewNote}
+          disabled={!canOpenFile}
+          title={canOpenFile ? 'Create a new note' : 'Open a vault first'}
+        >
+          + New note
+        </button>
       </div>
     </div>
   );
