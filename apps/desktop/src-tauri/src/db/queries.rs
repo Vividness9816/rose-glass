@@ -52,6 +52,13 @@ pub struct SearchHit {
 }
 
 #[derive(Serialize)]
+pub struct SemanticHit {
+    pub path: String,
+    pub title: String,
+    pub score: f32,
+}
+
+#[derive(Serialize)]
 pub struct TagCount {
     pub tag: String,
     pub count: i64,
@@ -367,6 +374,55 @@ pub fn get_clusters(conn: &Connection) -> rusqlite::Result<Vec<ClusterGroup>> {
     Ok(groups)
 }
 
+/// All stored note embeddings for `model`: (path, decoded f32 vector). Reads the
+/// `embeddings` BLOB store (populated by `recompute_clusters`). Filtering by `model`
+/// guards against a stale row from a previous embedding model decoding to a wrong-length
+/// vector (Phase 13 / ADR-20260618). This is the read path for brute-force KNN search.
+pub fn read_embeddings(conn: &Connection, model: &str) -> rusqlite::Result<Vec<(String, Vec<f32>)>> {
+    let mut stmt = conn.prepare("SELECT path, vector FROM embeddings WHERE model = ?1")?;
+    let rows = stmt.query_map(params![model], |r| {
+        let path: String = r.get(0)?;
+        let blob: Vec<u8> = r.get(1)?;
+        Ok((path, crate::embed::blob_to_vec(&blob)))
+    })?;
+    rows.collect()
+}
+
+/// `(embeddings_count, notes_count)` — a cheap freshness proxy. `embeddings` is refreshed
+/// ONLY by `recompute_clusters` (the manual Clusters button), never by the incremental
+/// indexer (ADR-20260618), so `embeddings_count < notes_count` means some notes are
+/// unembedded and semantic results are stale. `embeddings_count == 0` means semantic
+/// search isn't available yet (recompute to enable). The count is filtered by `model` to
+/// MATCH `read_embeddings` — otherwise a table of old-model rows would report `ready` while
+/// the (model-filtered) corpus the scan actually sees is empty. ponytail ceiling: a
+/// cardinality proxy can't detect same-count content drift (an edited note since the last
+/// recompute); a content-hash/`indexed_at` check would, if it ever bites.
+pub fn embedding_freshness(conn: &Connection, model: &str) -> rusqlite::Result<(i64, i64)> {
+    let emb: i64 =
+        conn.query_row("SELECT COUNT(*) FROM embeddings WHERE model = ?1", params![model], |r| r.get(0))?;
+    let notes: i64 = conn.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0))?;
+    Ok((emb, notes))
+}
+
+/// Titles for a set of result paths, in the order given (a note path always has a row in
+/// `notes`; falls back to the path if somehow missing). Used to enrich KNN hits — only
+/// the top-k, so the per-row lookup is cheap.
+pub fn titles_for(conn: &Connection, scored: Vec<crate::knn::Scored>) -> Vec<SemanticHit> {
+    scored
+        .into_iter()
+        .map(|h| {
+            let title: String = conn
+                .query_row("SELECT title FROM notes WHERE path = ?1", params![h.path], |r| r.get(0))
+                .unwrap_or_else(|_| h.path.clone());
+            SemanticHit {
+                path: h.path,
+                title,
+                score: h.score,
+            }
+        })
+        .collect()
+}
+
 pub fn get_tags(conn: &Connection) -> rusqlite::Result<Vec<TagCount>> {
     let mut stmt = conn.prepare(
         "SELECT tag, COUNT(*) AS c FROM tags GROUP BY tag ORDER BY c DESC, tag",
@@ -416,4 +472,107 @@ pub fn get_graph_payload(conn: &Connection) -> rusqlite::Result<GraphPayload> {
     };
 
     Ok(GraphPayload { nodes, edges })
+}
+
+#[cfg(test)]
+mod semantic_tests {
+    use super::*;
+    use crate::embed::{vec_to_blob, MODEL_NAME};
+
+    fn seed(conn: &Connection, path: &str, title: &str, vec: &[f32], model: &str) {
+        conn.execute(
+            "INSERT INTO notes (path,title,content_hash,mtime,word_count,indexed_at) VALUES (?1,?2,'h',0,1,0)",
+            params![path, title],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO embeddings (path, vector, model) VALUES (?1,?2,?3)",
+            params![path, vec_to_blob(vec), model],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn read_embeddings_decodes_and_filters_by_model() {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        seed(&conn, "a.md", "A", &[1.0, 0.0, 0.0], MODEL_NAME);
+        seed(&conn, "b.md", "B", &[0.0, 1.0, 0.0], MODEL_NAME);
+        seed(&conn, "old.md", "Old", &[9.0; 768], "some-old-model"); // wrong model + wrong dim
+
+        let corpus = read_embeddings(&conn, MODEL_NAME).unwrap();
+        assert_eq!(corpus.len(), 2, "the wrong-model row is filtered out");
+        let a = corpus.iter().find(|(p, _)| p == "a.md").unwrap();
+        assert_eq!(a.1, vec![1.0, 0.0, 0.0], "BLOB round-trips back to the vector");
+    }
+
+    #[test]
+    fn freshness_reports_empty_and_stale() {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        // empty: a note exists but no embeddings
+        conn.execute(
+            "INSERT INTO notes (path,title,content_hash,mtime,word_count,indexed_at) VALUES ('n.md','N','h',0,1,0)",
+            [],
+        )
+        .unwrap();
+        let (emb, notes) = embedding_freshness(&conn, MODEL_NAME).unwrap();
+        assert_eq!((emb, notes), (0, 1), "no embeddings yet ⇒ not ready");
+
+        // a row under a DIFFERENT model must NOT count toward freshness (matches the
+        // model-filtered read path, so ready/stale can't disagree with the scanned corpus)
+        seed(&conn, "old.md", "Old", &[1.0, 0.0], "some-old-model");
+        let (emb, _) = embedding_freshness(&conn, MODEL_NAME).unwrap();
+        assert_eq!(emb, 0, "an old-model row is not counted as ready under MODEL_NAME");
+
+        // stale: 3 notes, 1 embedded under the current model
+        seed(&conn, "m.md", "M", &[1.0, 0.0], MODEL_NAME);
+        let (emb, notes) = embedding_freshness(&conn, MODEL_NAME).unwrap();
+        assert!(emb < notes, "1 current-model embedding < 3 notes ⇒ stale");
+    }
+
+    #[test]
+    fn end_to_end_related_ranks_nearest_and_excludes_self() {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        // query note "me" points along x; "near" is close, "far" is orthogonal.
+        seed(&conn, "me.md", "Me", &[1.0, 0.0, 0.0], MODEL_NAME);
+        seed(&conn, "near.md", "Near", &[0.9, 0.1, 0.0], MODEL_NAME);
+        seed(&conn, "far.md", "Far", &[0.0, 0.0, 1.0], MODEL_NAME);
+
+        let corpus = read_embeddings(&conn, MODEL_NAME).unwrap();
+        let me = corpus.iter().find(|(p, _)| p == "me.md").unwrap().1.clone();
+        let scored = crate::knn::knn(&me, &corpus, 5, Some("me.md"));
+        let hits = titles_for(&conn, scored);
+
+        assert!(hits.iter().all(|h| h.path != "me.md"), "self excluded");
+        assert_eq!(hits[0].path, "near.md", "nearest neighbour ranks first");
+        assert_eq!(hits[0].title, "Near", "title attached from notes");
+        assert!(hits[0].score > hits[1].score, "near scores above far");
+    }
+
+    /// Phase 13 end-to-end with the REAL neural model: a free-text query ranks the
+    /// topically-matching note above an unrelated one (the whole point of semantic search).
+    /// #[ignore]d — reuses the cached ONNX model from the Phase-11 spike; run with --ignored.
+    #[test]
+    #[ignore = "uses the real ONNX model (cached after the embed spike); run with --ignored"]
+    fn semantic_search_ranks_topically_with_real_model() {
+        let dir = std::env::temp_dir().join("rg-fastembed-cache");
+        let mut model = crate::embed::new_model(&dir).unwrap();
+        let corpus_texts: Vec<&str> = vec![
+            "boil water add salt and cook the spaghetti al dente then drain",
+            "a neutron star is the dense collapsed core left by a massive star",
+        ];
+        let vecs = crate::embed::embed_texts(&mut model, &corpus_texts).unwrap();
+        let corpus: Vec<(String, Vec<f32>)> = vec!["pasta.md".to_string(), "stars.md".to_string()]
+            .into_iter()
+            .zip(vecs)
+            .collect();
+        let qv = crate::embed::embed_texts(&mut model, &["how do I cook pasta"])
+            .unwrap()
+            .remove(0);
+        let hits = crate::knn::knn(&qv, &corpus, 2, None);
+        assert_eq!(hits[0].path, "pasta.md", "a cooking query ranks the cooking note first");
+        assert!(hits[0].score > hits[1].score, "the cooking note scores strictly higher");
+    }
 }

@@ -20,6 +20,7 @@ with a riskiest-premise spike on a tiny scope before its build.
 | 10 | `phase10-mcp` | Read-only MCP sidecar (search + get_semantic_clusters) over stdio | ✅ done (cargo 35/35, e2e stdio proof) |
 | 11 | `phase11-clusters` | Local neural embeddings (all-MiniLM/ONNX) + k-means → `clusters` table; graph cluster colouring + MCP clusters | ✅ done (cargo 41/41 + real-model semantic test) |
 | 12 | `phase12-v1` | Full §20 acceptance gate | ⬜ |
+| 13 | `phase13-semantic` | Semantic search — brute-force cosine KNN over the stored embeddings (ADR-20260618; NOT sqlite-vec). Model-free "Related" list + free-text `semantic_search` IPC + freshness contract | ✅ done (post-v1.0 add; cargo 71 +real-model `#[ignore]d` proof, 3-lens reviewed). MCP tool + AppState model-cache deferred |
 
 ## Binding preconditions (from ADR-20260616)
 - **Phase 8** ships the §11.4 global-hook install + `~/.claude/projects` transcript-tail ONLY behind: explicit user OK · atomic `settings.json` backup + temp-write/rename + re-parse-validate-all-entries · `127.0.0.1`-only endpoint · no transcript persistence · secret-path redaction/exclusion · working uninstall.

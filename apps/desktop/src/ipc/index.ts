@@ -33,6 +33,19 @@ export interface TagCount {
   tag: string;
   count: number;
 }
+export interface SemanticHit {
+  path: string;
+  title: string;
+  /** cosine similarity to the query, −1..1 (1 = identical direction). */
+  score: number;
+}
+export interface SemanticResult {
+  /** false ⇒ no embeddings computed yet (recompute clusters to enable). */
+  ready: boolean;
+  /** true ⇒ some notes are unembedded since the last recompute; hits rank a partial corpus. */
+  stale: boolean;
+  hits: SemanticHit[];
+}
 export interface OpenVaultResult {
   vault: string;
   note_count: number;
@@ -66,6 +79,18 @@ export const recomputeClusters = () => invoke<number>('recompute_clusters');
 
 /** On-disk byte size of a vault file (Properties popover). Vault-relative + safe_join-guarded. */
 export const fileSize = (path: string) => invoke<number>('file_size', { path });
+
+/** Phase 13 (ADR-20260618): notes most similar to `path` by cosine over the stored
+ *  embeddings. MODEL-FREE (the note's vector is already stored) — fast, no ONNX. Excludes
+ *  the note itself. `ready=false` until clusters/embeddings are computed once. */
+export const relatedNotes = (path: string, k: number) =>
+  invoke<SemanticResult>('related_notes', { path, k });
+
+/** Phase 13: free-text semantic search — embeds `query` (local ONNX, loaded per call) and
+ *  ranks the stored embeddings by cosine. Submit-based, not as-you-type (the model load is
+ *  slow; cache it in AppState before wiring debounced search). */
+export const semanticSearch = (query: string, k: number) =>
+  invoke<SemanticResult>('semantic_search', { query, k });
 
 export const readNoteFile = (path: string) => invoke<string>('read_note_file', { path });
 export const saveNoteFile = (path: string, content: string) =>

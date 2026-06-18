@@ -3,7 +3,7 @@
 //! serializes commands with the watcher worker (single-writer in practice).
 
 use crate::db::queries::{
-    self, BacklinkDto, GraphPayload, NoteDto, OpenVaultResultDto, SearchHit, TagCount,
+    self, BacklinkDto, GraphPayload, NoteDto, OpenVaultResultDto, SearchHit, SemanticHit, TagCount,
 };
 use crate::db::{self};
 use crate::indexer::pipeline;
@@ -273,6 +273,96 @@ pub async fn recompute_clusters(
     // Graph + counts changed → Shell's onIndexRebuilt refetches and recolours.
     let _ = app.emit("index:rebuilt", serde_json::json!({ "note_count": items.len() }));
     Ok(n)
+}
+
+/// Upper bound on the untrusted top-`k` from the webview (the result is already corpus-
+/// bounded; this caps the title fan-out + IPC response if a non-UI caller passes a huge k).
+const MAX_KNN_K: usize = 200;
+/// Upper bound on a free-text semantic query (MiniLM truncates to its token window; this
+/// just rejects pathological multi-MB strings before the model load).
+const MAX_QUERY_BYTES: usize = 8192;
+
+/// Phase 13 semantic-search result. `ready=false` ⇒ the `embeddings` table is empty
+/// (recompute clusters to enable); `stale=true` ⇒ some notes are unembedded since the
+/// last recompute, so `hits` rank a partial corpus — the UI surfaces this rather than
+/// silently returning wrong "related" notes (ADR-20260618 freshness contract).
+#[derive(Serialize)]
+pub struct SemanticResult {
+    pub ready: bool,
+    pub stale: bool,
+    pub hits: Vec<SemanticHit>,
+}
+
+/// Phase 13: notes most semantically similar to `path`, by cosine over the stored
+/// embeddings (ADR-20260618). MODEL-FREE — the open note's vector is already in the
+/// `embeddings` table, so this is a pure DB read + scan under one lock (no ONNX). Excludes
+/// the note itself. Returns `ready=false` if no embeddings exist yet.
+#[tauri::command]
+pub async fn related_notes(
+    state: State<'_, AppState>,
+    path: String,
+    k: usize,
+) -> Result<SemanticResult, IpcError> {
+    let k = k.min(MAX_KNN_K); // clamp untrusted top-k (the result is corpus-bounded, but cap the response/title fan-out)
+    let db = lock(&state.db);
+    let (emb, notes) = queries::embedding_freshness(&db, crate::embed::MODEL_NAME)?;
+    if emb == 0 {
+        return Ok(SemanticResult { ready: false, stale: false, hits: vec![] });
+    }
+    let corpus = queries::read_embeddings(&db, crate::embed::MODEL_NAME)?;
+    let stale = emb < notes;
+    // The open note may not be embedded yet (added since the last recompute): no query
+    // vector ⇒ no neighbours, but report stale so the UI can prompt a recompute.
+    let Some((_, query_vec)) = corpus.iter().find(|(p, _)| p == &path).cloned() else {
+        return Ok(SemanticResult { ready: true, stale: true, hits: vec![] });
+    };
+    let scored = crate::knn::knn(&query_vec, &corpus, k, Some(&path));
+    Ok(SemanticResult { ready: true, stale, hits: queries::titles_for(&db, scored) })
+}
+
+/// Phase 13: free-text semantic search — embed `query` (local ONNX) and rank the stored
+/// note embeddings by cosine (ADR-20260618). Lock discipline mirrors `recompute_clusters`:
+/// read the corpus under the lock, embed UNLOCKED (model load + inference is slow), re-lock
+/// only to attach titles. ponytail: the model is loaded per call (same as recompute) —
+/// cache a `TextEmbedding` in `AppState` if interactive search latency bites.
+#[tauri::command]
+pub async fn semantic_search(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    query: String,
+    k: usize,
+) -> Result<SemanticResult, IpcError> {
+    let k = k.min(MAX_KNN_K);
+    // Bound the untrusted query before the per-call model load (a multi-MB string is pure
+    // waste — MiniLM truncates to its token window anyway). Mirrors read_file_bytes' cap.
+    if query.len() > MAX_QUERY_BYTES {
+        return Err(IpcError(format!(
+            "query too long ({} bytes; cap {})",
+            query.len(),
+            MAX_QUERY_BYTES
+        )));
+    }
+    let (emb, notes, corpus) = {
+        let db = lock(&state.db);
+        let (emb, notes) = queries::embedding_freshness(&db, crate::embed::MODEL_NAME)?;
+        if emb == 0 {
+            return Ok(SemanticResult { ready: false, stale: false, hits: vec![] });
+        }
+        (emb, notes, queries::read_embeddings(&db, crate::embed::MODEL_NAME)?)
+    };
+
+    let cache = app.path().app_cache_dir()?.join("models");
+    std::fs::create_dir_all(&cache)?;
+    let mut model = crate::embed::new_model(&cache).map_err(IpcError)?;
+    let query_vec = crate::embed::embed_texts(&mut model, &[query])
+        .map_err(IpcError)?
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+
+    let scored = crate::knn::knn(&query_vec, &corpus, k, None);
+    let db = lock(&state.db);
+    Ok(SemanticResult { ready: true, stale: emb < notes, hits: queries::titles_for(&db, scored) })
 }
 
 /// Phase 8: start the read-only CC activity tail (ADR-20260617 M1 — transcript-tail

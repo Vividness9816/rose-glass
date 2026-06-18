@@ -6,7 +6,15 @@
 
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { EditorView } from '@codemirror/view';
-import { fileSize, inTauri, type BacklinkDto, type NoteDto } from '../ipc';
+import {
+  fileSize,
+  inTauri,
+  onIndexRebuilt,
+  relatedNotes,
+  type BacklinkDto,
+  type NoteDto,
+  type SemanticResult,
+} from '../ipc';
 import { CodeMirrorHost } from '../editor/CodeMirrorHost';
 import { editorKind } from '../editor/editorKind';
 import { parseOutline } from '../editor/outline';
@@ -71,6 +79,43 @@ export function EditorPane({
   const [panel, setPanel] = useState<'none' | 'outline' | 'properties'>('none');
   const [copied, setCopied] = useState(false);
   const [sizeBytes, setSizeBytes] = useState<number | null>(null);
+  const [related, setRelated] = useState<SemanticResult | null>(null);
+  const [rebuiltNonce, setRebuiltNonce] = useState(0);
+
+  // Refetch related notes after a full reindex / cluster recompute (index:rebuilt) so the
+  // panel self-heals from "recompute to enable" → populated without a note switch.
+  useEffect(() => {
+    if (!inTauri()) return;
+    let active = true;
+    let un: (() => void) | undefined;
+    onIndexRebuilt(() => setRebuiltNonce((n) => n + 1)).then((u) => {
+      if (active) un = u;
+      else u();
+    });
+    return () => {
+      active = false;
+      un?.();
+    };
+  }, []);
+
+  // Phase 13: fetch semantically-related notes when the open note changes (model-free —
+  // the note's vector is already stored, so this is a cheap DB scan). Keyed on the path so
+  // a same-note refetch (autosave → getNote) doesn't re-run; also on rebuiltNonce so a
+  // recompute repopulates it. Silent on the web build.
+  useEffect(() => {
+    setRelated(null);
+    if (!note || !inTauri()) return;
+    let cancelled = false;
+    relatedNotes(note.path, 6)
+      .then((r) => {
+        if (!cancelled) setRelated(r);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key on the path + rebuild nonce, not the object identity
+  }, [note?.path, rebuiltNonce]);
 
   // Fetch the note's on-disk byte size when the Properties popover opens (cheap stat IPC).
   useEffect(() => {
@@ -262,6 +307,40 @@ export function EditorPane({
                 </div>
               </button>
             ))}
+          </div>
+        )}
+
+        {related && related.hits.length > 0 && (
+          <div className="backlinks">
+            <div className="bl-label">
+              Related · {related.hits.length}
+              {related.stale ? ' · may be out of date' : ''}
+            </div>
+            {related.hits.map((h) => (
+              <button key={h.path} className="bl-item" type="button" onClick={() => onOpenPath(h.path)}>
+                <div className="bl-dot bl-dot-violet" />
+                <div>
+                  <div className="bl-title">{h.title}</div>
+                  <div className="bl-excerpt">
+                    {h.path} · {Math.round(h.score * 100)}% similar
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Freshness contract (ADR-20260618): when there are no hits because embeddings
+            aren't computed (or this note isn't embedded yet), say so + how to fix — don't
+            stay silent. A genuinely-unrelated note (ready, fresh, 0 hits) shows nothing. */}
+        {note && related && related.hits.length === 0 && (!related.ready || related.stale) && (
+          <div className="backlinks">
+            <div className="bl-label">Related</div>
+            <div className="bl-excerpt" style={{ padding: '2px 2px 0' }}>
+              {related.ready
+                ? 'This note has no embedding yet. Click “Clusters” in the graph header to refresh semantic search.'
+                : 'Click “Clusters” in the graph header to enable semantic search.'}
+            </div>
           </div>
         )}
       </div>

@@ -35,7 +35,7 @@ pub fn vec_to_blob(v: &[f32]) -> Vec<u8> {
     out
 }
 
-#[allow(dead_code)] // decode half of the codec — exercised by the round-trip test; re-cluster-without-re-embed will use it
+/// Decode half of the codec — used by `queries::read_embeddings` (Phase 13 KNN search).
 pub fn blob_to_vec(b: &[u8]) -> Vec<f32> {
     b.chunks_exact(4)
         .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))

@@ -64,9 +64,24 @@ Then **Phase 12** = the full §20 gate: with every row ✅, tag **v1.0**.
   settings read-only — 20 hooks preserved + round-trips) exists, but **arming is your
   in-app click**, never autonomous.
 
+## Phase 13 — semantic search SHIPPED (2026-06-18, brute-force per ADR-20260618)
+- **KNN semantic search over the stored embeddings is BUILT.** `/council` (5/5) chose
+  **brute-force cosine KNN in pure Rust** over the existing `embeddings` BLOBs, **not the
+  sqlite-vec C extension** — the vectors already live in-Rust and a linear scan is
+  sub-perceptible for a personal vault; sqlite-vec/HNSW is the named upgrade past ~100k
+  notes (ADR-20260618). Surfaces: a model-free **"Related"** list in the editor
+  (`related_notes`) + a free-text `semantic_search` IPC. Freshness contract: both surface
+  `ready=false` / `stale` (recompute clusters to enable/refresh) instead of silently ranking
+  a partial corpus. Gates: cargo lib 71 (+9 KNN/semantic tests) · clippy 0 · tsc/vitest/build 0.
+- **App-window eyeball (the live part):** open a note → the **Related** list ranks
+  similar notes (click "Clusters" first if it says "enable semantic search"); after a
+  recompute it self-heals without a note switch.
+
 ## Optional (non-gating) leftovers — build only if you want them
-- **sqlite-vec KNN semantic search** (vectors already stored as BLOBs; this adds vector
-  *search* on top of the existing k-means clustering). Headless-buildable + testable.
+- **sqlite-vec / in-memory HNSW** — the indexed-search upgrade for the brute-force KNN
+  above; only earns its keep past ~tens-of-thousands of notes + a *measured* latency
+  regression (ADR-20260618). An MCP `search_semantic` tool is deferred too (no external
+  caller yet — decisions.md #8; the FTS `search` tool already serves the sidecar).
 - **Real M2 hook forwarding** — needs `/council` (ADR-20260617 deferred it for cost/dedup;
   M1 already covers the use case).
 - **`tauri-plugin-decorum`** frameless edge-resize (current ceiling: reduced edge-resize on

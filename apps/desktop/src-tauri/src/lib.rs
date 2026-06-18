@@ -6,6 +6,7 @@ pub mod db; // exposed for the rose-glass-mcp sidecar bin (read surface — §14
 mod embed;
 mod fs_safe;
 mod indexer;
+mod knn;
 mod state;
 mod terminal;
 mod watcher;
@@ -43,6 +44,8 @@ pub fn run() {
             commands::file_size,
             commands::resolve_link,
             commands::recompute_clusters,
+            commands::related_notes,
+            commands::semantic_search,
             commands::activity_start,
             commands::activity_stop,
             commands::activity_hook_plan,
