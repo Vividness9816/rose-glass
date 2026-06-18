@@ -259,6 +259,9 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
     const n = lookupNodeByRel(this.pathIndex, rel);
     if (n) this.pulses.set(n.id, { kind: action, t: 1 });
   }
+  // ponytail: focus dimming is a 2D-path feature today; the GPU renderer lands it with
+  // the shader-parity increment. No-op keeps the toggle from breaking on the GPU path.
+  setFocus(_path: string | null) {}
 
   start() {
     if (this.running) return;

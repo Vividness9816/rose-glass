@@ -74,6 +74,9 @@ export class GraphRenderer implements GraphRendererLike {
   private byId = new Map<number, GraphNode>();
   private camera: Camera = IDENTITY_CAMERA; // Phase 4 pan/zoom
   private draggingId: number | null = null; // pinned node while dragging
+  // Local-graph focus (the "Focus" scope): when set, only these node ids render at
+  // full strength; everything else is dimmed. null = the whole graph ("All").
+  private focusSet: Set<number> | null = null;
 
   constructor(canvas: HTMLCanvasElement, data: GraphData, theme: GraphTheme, dpr = 1) {
     const ctx = canvas.getContext('2d');
@@ -103,6 +106,34 @@ export class GraphRenderer implements GraphRendererLike {
   pulse(rel: string, action: 'read' | 'modify') {
     const n = lookupNodeByRel(this.pathIndex, rel);
     if (n) this.pulses.set(n.id, { kind: action, t: 1 });
+  }
+
+  /** Local-graph focus: dim everything except `path`'s node and its 1-hop neighbours.
+      `null` (or an unknown path) shows the whole graph. */
+  setFocus(path: string | null) {
+    if (!path) {
+      this.focusSet = null;
+      return;
+    }
+    const n = lookupNodeByRel(this.pathIndex, path);
+    if (!n) {
+      this.focusSet = null;
+      return;
+    }
+    const set = new Set<number>([n.id]);
+    for (const e of this.data.edges) {
+      if (e.a === n.id) set.add(e.b);
+      else if (e.b === n.id) set.add(e.a);
+    }
+    this.focusSet = set;
+  }
+
+  /** Render alpha for a node / an edge under the current focus (1 = full, <1 = dimmed). */
+  private nodeAlpha(id: number): number {
+    return this.focusSet && !this.focusSet.has(id) ? 0.12 : 1;
+  }
+  private edgeAlpha(a: number, b: number): number {
+    return this.focusSet && !this.focusSet.has(a) && !this.focusSet.has(b) ? 0.08 : 1;
   }
 
   // ── Phase 4 interaction (screen coords = CSS px; the camera maps to world) ──
@@ -224,6 +255,7 @@ export class GraphRenderer implements GraphRendererLike {
       nodes.slice(i + 1).forEach((m, j) => {
         if (n.cluster !== m.cluster) return;
         if (Math.hypot(n.x - m.x, n.y - m.y) > 140) return;
+        ctx.globalAlpha = this.edgeAlpha(n.id, m.id);
         const { mx, my } = midpoint(n, m, i, i + j + 1);
         ctx.beginPath();
         ctx.moveTo(n.x, n.y);
@@ -237,6 +269,7 @@ export class GraphRenderer implements GraphRendererLike {
     // cluster auras
     nodes.forEach((n) => {
       if (n.links < 1) return;
+      ctx.globalAlpha = this.nodeAlpha(n.id);
       const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, 50);
       g.addColorStop(0, rgba(clusterRgb(n.cluster), 0.1));
       g.addColorStop(1, 'transparent');
@@ -251,6 +284,7 @@ export class GraphRenderer implements GraphRendererLike {
       const na = nodes[e.a];
       const nb = nodes[e.b];
       if (!na || !nb) return;
+      ctx.globalAlpha = this.edgeAlpha(e.a, e.b);
       const isCross = na.cluster !== nb.cluster;
       const { mx, my } = midpoint(na, nb, e.a, e.b);
       const col = isCross ? theme.crossEdge : clusterRgb(na.cluster);
@@ -289,6 +323,7 @@ export class GraphRenderer implements GraphRendererLike {
       const nb = nodes[p.e.b];
       if (!na || !nb) return;
       if (Math.hypot(na.x - nb.x, na.y - nb.y) > 160) return;
+      ctx.globalAlpha = this.edgeAlpha(p.e.a, p.e.b);
       const { mx, my } = midpoint(na, nb, p.e.a, p.e.b);
       const t = p.t;
       const x = (1 - t) * (1 - t) * na.x + 2 * (1 - t) * t * mx + t * t * nb.x;
@@ -302,6 +337,7 @@ export class GraphRenderer implements GraphRendererLike {
 
     // nodes
     nodes.forEach((n) => {
+      ctx.globalAlpha = this.nodeAlpha(n.id);
       const cluster = clusterRgb(n.cluster);
       const clusterAccent = theme.clusters[n.cluster]?.accent ?? theme.clusters[0].accent;
       // Phase-6 bullseye inversion (theme-driven): dark = cluster-colour shell + ink core;
@@ -387,6 +423,9 @@ export class GraphRenderer implements GraphRendererLike {
       }
     });
 
+    // activity flares + the next frame's base layer always render at full strength,
+    // regardless of focus dimming applied to the node/edge layers above.
+    ctx.globalAlpha = 1;
     // Phase 8 — CC activity flares overlaid on their nodes: read=violet pulse,
     // modify=rose flare (A6), each an expanding ring that fades as `t` decays.
     this.pulses.forEach((p, id) => {

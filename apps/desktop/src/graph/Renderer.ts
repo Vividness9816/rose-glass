@@ -21,4 +21,7 @@ export interface GraphRendererLike {
   setDragging(id: number | null): void;
   // Phase 8 activity light-up
   pulse(rel: string, action: 'read' | 'modify'): void;
+  /** Local-graph focus: dim everything except `path`'s node + its 1-hop neighbours.
+      `null` clears focus (show the whole graph). */
+  setFocus(path: string | null): void;
 }

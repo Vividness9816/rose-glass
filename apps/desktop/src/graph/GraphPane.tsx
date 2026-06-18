@@ -19,10 +19,13 @@ export function GraphPane({
   clustering,
   pulseRef,
   onOpenNode,
+  activePath,
 }: {
   theme: Theme;
   data?: GraphData;
   onOpenVault?: () => void;
+  /** The open note's path — the centre of "Focus" (local-graph) scope. */
+  activePath?: string | null;
   onCluster?: () => void;
   clustering?: boolean;
   /** Phase 8: Shell populates this with a node light-up fn (read=violet/modify=rose),
@@ -35,6 +38,11 @@ export function GraphPane({
   const rendererRef = useRef<GraphRendererLike | null>(null);
   const onOpenNodeRef = useRef(onOpenNode);
   onOpenNodeRef.current = onOpenNode;
+  const [scope, setScope] = useState<'all' | 'focus'>('all'); // graph scope: whole graph vs local
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  const activePathRef = useRef(activePath);
+  activePathRef.current = activePath;
   const [gpuOn, setGpuOn] = useState(false); // user intent: try the WebGPU path
   const [gpuAvailable, setGpuAvailable] = useState<boolean | null>(null); // null = probing
   const [gpuReason, setGpuReason] = useState('probing…');
@@ -103,6 +111,7 @@ export function GraphPane({
       rendererRef.current = r;
       const s = sizeCanvas(); // honor any resize that landed during the async build
       r.setSize(s.w, s.h, s.dpr);
+      r.setFocus(scopeRef.current === 'focus' ? (activePathRef.current ?? null) : null); // re-apply focus after a rebuild
       r.start();
     };
 
@@ -130,6 +139,11 @@ export function GraphPane({
   useEffect(() => {
     rendererRef.current?.setTheme(resolveGraphTheme());
   }, [theme]);
+
+  // Local-graph focus: dim everything but the open note + its neighbours (or clear it).
+  useEffect(() => {
+    rendererRef.current?.setFocus(scope === 'focus' ? (activePath ?? null) : null);
+  }, [scope, activePath]);
 
   // Phase 4 — pan / zoom / drag / click-open. Native listeners (wheel needs
   // passive:false to preventDefault); all forward to the live renderer's camera.
@@ -222,8 +236,25 @@ export function GraphPane({
               Open vault…
             </button>
           )}
-          <button className="gc-btn active" type="button">All</button>
-          <button className="gc-btn" type="button">Focus</button>
+          <button
+            className={`gc-btn${scope === 'all' ? ' active' : ''}`}
+            type="button"
+            onClick={() => setScope('all')}
+            aria-pressed={scope === 'all'}
+            title="Show the whole graph"
+          >
+            All
+          </button>
+          <button
+            className={`gc-btn${scope === 'focus' ? ' active' : ''}`}
+            type="button"
+            onClick={() => setScope('focus')}
+            disabled={!activePath}
+            aria-pressed={scope === 'focus'}
+            title={activePath ? 'Focus the open note + its links' : 'Open a note to focus its local graph'}
+          >
+            Focus
+          </button>
           <button
             className="gc-btn"
             type="button"

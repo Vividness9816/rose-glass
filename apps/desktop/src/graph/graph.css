@@ -57,9 +57,13 @@
   cursor: default;
   transition: all var(--dur-fast) var(--ease);
 }
-.gc-btn:hover {
+.gc-btn:hover:not(:disabled) {
   border-color: var(--border-strong);
   color: var(--text-2);
+}
+.gc-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .gc-btn.active {
   border-color: var(--rose);
