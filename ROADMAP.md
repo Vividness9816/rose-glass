@@ -19,7 +19,7 @@ with a riskiest-premise spike on a tiny scope before its build.
 | 9 | `phase9-formats` | Editor engines — **lossless-only (ADR-20260617, scope revised from "true PDF edit/TipTap+docx round-trip")**: PDF view-only (PDF.js) + docx view (mammoth) + edit-as-sibling-md + binary-read IPC; `.md/.txt/.pdf` association | 🟢 BUILT + 3-lens-reviewed (14/14 fixed), commit `40d756f`; gates green (tsc/vitest 56/vite + cargo 52/clippy). NO MuPDF/TipTap/pdf-lib/docx-writer, NO binary indexing (all dropped/deferred per ADR). **Remaining: LIVE in-app PDF/docx render = user app-window eyeball** (`phase9-formats`) |
 | 10 | `phase10-mcp` | Read-only MCP sidecar (search + get_semantic_clusters) over stdio | ✅ done (cargo 35/35, e2e stdio proof) |
 | 11 | `phase11-clusters` | Local neural embeddings (all-MiniLM/ONNX) + k-means → `clusters` table; graph cluster colouring + MCP clusters | ✅ done (cargo 41/41 + real-model semantic test) |
-| 12 | `phase12-v1` | Full §20 acceptance gate | ⬜ |
+| 12 | `phase12-v1` | Full §20 acceptance gate | ✅ **PASSED → v1.0 (2026-06-18)** — all 11 §20 rows proven; the 6 live-window rows confirmed by the user's walkthrough. Tagged `v1.0` |
 | 13 | `phase13-semantic` | Semantic search — brute-force cosine KNN over the stored embeddings (ADR-20260618; NOT sqlite-vec). Model-free "Related" list + free-text `semantic_search` IPC + freshness contract | ✅ done (post-v1.0 add; cargo 71 +real-model `#[ignore]d` proof, 3-lens reviewed). MCP tool + AppState model-cache deferred |
 
 ## Binding preconditions (from ADR-20260616)

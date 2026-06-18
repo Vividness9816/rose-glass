@@ -3,6 +3,12 @@
 Local-first PKM + live Claude Code activity mirror (Tauri 2 + React 19 + TS-strict).
 **Repo:** `C:\Users\dnoye\rose-glass` · **private remote** `Vividness9816/rose-glass` · branch `master`.
 
+> ## ✅ v1.0 COMPLETE (2026-06-18) — `phase12-v1` §20 acceptance gate PASSED, tagged `v1.0`.
+> All 11 §20 rows proven; the 6 live-window rows (A1/A2/A5/A6/A8/A11) confirmed by the user's
+> live walkthrough. Gates green: tsc 0 · vitest 73/73 · cargo 71 · clippy 0 · A2 visual 4/4.
+> Post-v1.0 Phase-13 (semantic search) also shipped. Optional, non-gating: M2 hook arming
+> (user's attended click; M1 covers A6), sqlite-vec index, taste dials, populated A2 diffs.
+
 **Authoritative docs (read these to resume):**
 - `STATUS.md` — §20 acceptance ledger (proven / partial / untouched; each `proven` row cites a commit + artifact)
 - `ROADMAP.md` — phase plan; commit scopes are `feat(phaseN-...)` so `git log --grep=phaseN` is the resumption index
