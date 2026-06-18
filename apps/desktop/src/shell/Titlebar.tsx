@@ -31,20 +31,29 @@ export function Titlebar({
           className="tl tl-close"
           type="button"
           aria-label="Close"
+          title="Close"
           onClick={() => windowAction('close')}
-        />
+        >
+          <span className="tl-glyph" aria-hidden="true">×</span>
+        </button>
         <button
           className="tl tl-min"
           type="button"
           aria-label="Minimize"
+          title="Minimize"
           onClick={() => windowAction('minimize')}
-        />
+        >
+          <span className="tl-glyph" aria-hidden="true">−</span>
+        </button>
         <button
           className="tl tl-max"
           type="button"
           aria-label="Maximize"
+          title="Maximize"
           onClick={() => windowAction('toggleMaximize')}
-        />
+        >
+          <span className="tl-glyph" aria-hidden="true">+</span>
+        </button>
       </div>
       <div className="title-center">{vault} — Rose Glass</div>
       <div className="titlebar-right">

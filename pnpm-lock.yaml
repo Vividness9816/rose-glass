@@ -49,9 +49,6 @@ importers:
       dompurify:
         specifier: ^3.4.11
         version: 3.4.11
-      liquid-glass-js:
-        specifier: ^0.1.0
-        version: 0.1.0
       mammoth:
         specifier: ^1.12.0
         version: 1.12.0
@@ -1012,9 +1009,6 @@ packages:
 
   lie@3.3.0:
     resolution: {integrity: sha512-UaiMJzeWRlEujzAuw5LokY1L5ecNQYZKfmyZ9L7wDHb/p5etKaxXhohBcrw0EYby+G/NA52vRSN4N39dxHAIwQ==}
-
-  liquid-glass-js@0.1.0:
-    resolution: {integrity: sha512-7+PdaoEap90QnrqUySFx/iJLVQaidw4u9IExgnBw6mhf7BBmqWfJIeHF9P7zp/MitE6GCHF9MV1A54OsWtTqxg==}
 
   lop@0.4.2:
     resolution: {integrity: sha512-RefILVDQ4DKoRZsJ4Pj22TxE3omDO47yFpkIBoDKzkqPRISs5U1cnAdg/5583YPkWPaLIYHOKRMQSvjFsO26cw==}
@@ -2132,8 +2126,6 @@ snapshots:
   lie@3.3.0:
     dependencies:
       immediate: 3.0.6
-
-  liquid-glass-js@0.1.0: {}
 
   lop@0.4.2:
     dependencies:

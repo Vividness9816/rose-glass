@@ -12,6 +12,8 @@ export interface GraphTheme {
   bg: string;
   bgRgb: RGB; // same as bg, kept as a triple so the canvas can fill it translucent (let the §21 backdrop through)
   nodeCore: string;
+  nodeCoreRgb: RGB; // the core colour as a triple, so the inverted bullseye can use it for rings
+  invertNodes: boolean; // light theme: swap cluster-colour ↔ ink across the node bullseye
   clusters: { accent: string; rgb: RGB }[];
   crossEdge: RGB;
   label: RGB;
@@ -45,10 +47,15 @@ export function resolveGraphTheme(): GraphTheme {
   });
   const bg = resolve('var(--graph-bg)');
   const core = resolve('var(--graph-node-core)');
+  // numeric flag, so the bullseye inversion lives in the token layer (A10), not the renderer
+  const invertNodes =
+    getComputedStyle(document.documentElement).getPropertyValue('--graph-node-invert').trim() === '1';
   return {
     bg: `rgb(${bg[0]},${bg[1]},${bg[2]})`,
     bgRgb: bg,
     nodeCore: `rgb(${core[0]},${core[1]},${core[2]})`,
+    nodeCoreRgb: core,
+    invertNodes,
     clusters,
     crossEdge: resolve('var(--graph-cross-edge)'),
     label: resolve('var(--text-1)'),

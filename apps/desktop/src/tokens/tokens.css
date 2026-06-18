@@ -55,6 +55,7 @@
   --tl-close: #ff5f57;
   --tl-min:   #febc2e;
   --tl-max:   #28c840;
+  --tl-glyph: rgba(10, 4, 8, 0.62); /* the × − + revealed on hover (dark-on-bright, OS convention) */
 
   /* White text on the saturated rose primary (both themes) */
   --text-on-rose: #fff;
@@ -68,6 +69,7 @@
   /* Graph ambient/edge helpers, kept as tokens so the canvas stays themeable */
   --graph-bg:        var(--bg);
   --graph-node-core: #08030a;
+  --graph-node-invert: 0; /* 0 = dark (cluster-colour rings, ink core); 1 = light (inverted bullseye) */
   --graph-cross-edge: var(--violet);
 
   /* Fonts */
@@ -134,4 +136,8 @@
   /* Graph: light field, dark node cores (ink-on-paper), deep cluster rings */
   --graph-bg:        var(--bg);
   --graph-node-core: #2a0810;
+  /* Light inverts the node bullseye: dark ink rings around a cluster-colour core
+     (ink-on-paper figure/ground), so a node reads as black/colour/black vs dark's
+     colour/black/colour. Set back to 0 to keep light bullseyes colour-first. */
+  --graph-node-invert: 1;
 }

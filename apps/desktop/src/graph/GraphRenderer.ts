@@ -302,8 +302,15 @@ export class GraphRenderer implements GraphRendererLike {
 
     // nodes
     nodes.forEach((n) => {
-      const rgbC = clusterRgb(n.cluster);
-      const accent = theme.clusters[n.cluster]?.accent ?? theme.clusters[0].accent;
+      const cluster = clusterRgb(n.cluster);
+      const clusterAccent = theme.clusters[n.cluster]?.accent ?? theme.clusters[0].accent;
+      // Phase-6 bullseye inversion (theme-driven): dark = cluster-colour shell + ink core;
+      // light swaps them → ink shell + cluster-colour core, so a node reads black/colour/black
+      // instead of colour/black/colour. Redefining rgbC/accent here flips the rings/aura/dots
+      // and the accent stroke automatically; only the core disc needs coreFill.
+      const rgbC = theme.invertNodes ? theme.nodeCoreRgb : cluster; // shell: rings / aura / dots / strokes
+      const accent = theme.invertNodes ? theme.nodeCore : clusterAccent; // hub accent ring stroke
+      const coreFill = theme.invertNodes ? clusterAccent : theme.nodeCore; // centre disc
       const pulse = Math.sin(n.phase) * 0.5 + 0.5;
 
       if (n.hub) {
@@ -323,7 +330,7 @@ export class GraphRenderer implements GraphRendererLike {
         ctx.fill();
         ctx.beginPath();
         ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-        ctx.fillStyle = theme.nodeCore;
+        ctx.fillStyle = coreFill;
         ctx.fill();
         ctx.strokeStyle = accent;
         ctx.lineWidth = 1.5;
@@ -360,7 +367,7 @@ export class GraphRenderer implements GraphRendererLike {
         ctx.fill();
         ctx.beginPath();
         ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-        ctx.fillStyle = theme.nodeCore;
+        ctx.fillStyle = coreFill;
         ctx.fill();
         ctx.strokeStyle = rgba(rgbC, 0.8);
         ctx.lineWidth = 1;
@@ -372,7 +379,7 @@ export class GraphRenderer implements GraphRendererLike {
       } else {
         ctx.beginPath();
         ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-        ctx.fillStyle = theme.nodeCore;
+        ctx.fillStyle = coreFill;
         ctx.fill();
         ctx.strokeStyle = rgba(rgbC, 0.2);
         ctx.lineWidth = 0.5;

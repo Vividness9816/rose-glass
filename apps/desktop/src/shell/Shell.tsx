@@ -20,7 +20,6 @@ import { editorKind } from '../editor/editorKind';
 import { siblingMdPath, toVaultRelative } from '../editor/fileOpen';
 import { GraphPane } from '../graph/GraphPane';
 import { Backdrop } from '../backdrop/Backdrop';
-import { LiquidGlassLens } from '../backdrop/LiquidGlassLens';
 import { TerminalPane } from '../terminal/TerminalPane';
 import { CommandPalette } from '../command/CommandPalette';
 import { ActivityPane } from '../activity/ActivityPane';
@@ -70,7 +69,6 @@ export function Shell() {
   const [doc, setDoc] = useState('');
   const [binaryPath, setBinaryPath] = useState<string | null>(null); // Phase 9: open pdf/docx (not an indexed note)
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [lensOn, setLensOn] = useState(false); // eamonliu liquid-glass graph lens; off by default
   const [terminalOpen, setTerminalOpen] = useState(false); // Ctrl+` toggles the terminal drawer
   const [clustering, setClustering] = useState(false); // Phase 11 embed+cluster in progress
   const [railView, setRailView] = useState('graph'); // which IconRail view; 'activity' swaps the right pane
@@ -385,7 +383,6 @@ export function Shell() {
   return (
     <>
     <Backdrop theme={theme} />
-    {lensOn && <LiquidGlassLens theme={theme} />}
     <div className="app-shell">
       <Titlebar
         vault={vault}
@@ -393,14 +390,15 @@ export function Shell() {
         onOpenFile={() => void onOpenFile()}
         canOpenFile={graphData !== undefined}
       />
-      <IconRail active={railView} onSelect={setRailView} />
+      <IconRail
+        active={railView}
+        onSelect={(id) => (id === 'search' ? openPalette() : setRailView(id))}
+      />
       <div className="main-area">
         <GraphPane
           theme={theme}
           data={graphData}
           onOpenVault={openVaultFlow}
-          lensOn={lensOn}
-          onToggleLens={() => setLensOn((v) => !v)}
           onCluster={onCluster}
           clustering={clustering}
           pulseRef={graphPulseRef}

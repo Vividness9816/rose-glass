@@ -10,6 +10,10 @@
 
 import type { GraphNode } from './types';
 
+/** Idle-drift amplitude — the graph's continuous "breathing". Tuned so cohesion still
+    holds clusters together while every node visibly wanders. */
+const DRIFT = 0.06;
+
 /** Deterministic RNG (mulberry32) — seed the jitter so a simulation run is
     reproducible in tests; production uses Math.random. */
 export function makeRng(seed: number): () => number {
@@ -32,8 +36,16 @@ export function stepSimulation(
   rng: () => number = Math.random,
 ): void {
   nodes.forEach((n) => {
-    n.vx += (rng() - 0.5) * 0.04;
-    n.vy += (rng() - 0.5) * 0.04;
+    // Continuous organic drift: each node wanders on its OWN seeded phase, so the whole
+    // graph keeps gently flowing instead of settling into a frozen equilibrium. A coherent
+    // sine survives the velocity damping below; the old ±random jitter averaged to zero and
+    // damped out, which is exactly why the graph looked rigid until a node was dragged. Two
+    // incommensurate frequencies (1.0 / 0.7) make an organic Lissajous wander, not a straight
+    // diagonal. ponytail: DRIFT is the single liveliness dial — raise for more motion.
+    n.vx += Math.cos(n.phase) * DRIFT;
+    n.vy += Math.sin(n.phase * 0.7 + 1.3) * DRIFT;
+    n.vx += (rng() - 0.5) * 0.02; // a touch of noise so the wander isn't perfectly periodic
+    n.vy += (rng() - 0.5) * 0.02;
     // cohesion toward the live centroid of cluster mates (resize-safe)
     const mates = nodes.filter((m) => m.cluster === n.cluster && m.id !== n.id);
     if (mates.length) {

@@ -15,8 +15,6 @@ export function GraphPane({
   theme,
   data,
   onOpenVault,
-  lensOn,
-  onToggleLens,
   onCluster,
   clustering,
   pulseRef,
@@ -25,8 +23,6 @@ export function GraphPane({
   theme: Theme;
   data?: GraphData;
   onOpenVault?: () => void;
-  lensOn?: boolean;
-  onToggleLens?: () => void;
   onCluster?: () => void;
   clustering?: boolean;
   /** Phase 8: Shell populates this with a node light-up fn (read=violet/modify=rose),
@@ -237,17 +233,6 @@ export function GraphPane({
           >
             {clustering ? '…clustering' : 'Clusters'}
           </button>
-          {onToggleLens && (
-            <button
-              className={`gc-btn${lensOn ? ' active' : ''}`}
-              type="button"
-              onClick={onToggleLens}
-              aria-pressed={lensOn}
-              title="Drag a liquid-glass lens over the graph"
-            >
-              ◎ Lens
-            </button>
-          )}
           <button
             className={`gc-btn${gpuOn ? ' active' : ''}`}
             type="button"
