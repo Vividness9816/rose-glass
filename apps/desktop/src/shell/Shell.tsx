@@ -34,6 +34,7 @@ import { Titlebar } from './Titlebar';
 import { IconRail } from './IconRail';
 import { EditorPane } from './EditorPane';
 import { StatusBar } from './StatusBar';
+import { loadSession, saveSession } from './session';
 import {
   activityStart,
   activityStop,
@@ -174,6 +175,7 @@ export function Shell() {
         setNote(n);
         setBacklinks(bl);
         setDoc(toLf(raw)); // editor works in LF; original EOL re-applied on save
+        saveSession({ notePath: path }); // resume into this note next launch
       } catch (e) {
         console.error('open note failed:', e);
       }
@@ -273,23 +275,43 @@ export function Shell() {
     [openNote],
   );
 
+  // Open a vault by absolute path (no dialog). Opens `restoreNote` if it still exists,
+  // else the first note. Shared by the Open-vault dialog and the boot session-restore.
+  const openVaultByPath = useCallback(
+    async (dir: string, restoreNote?: string) => {
+      if (!inTauri()) return;
+      try {
+        const res = await openVault(dir);
+        vaultRootRef.current = res.vault; // absolute root, for the Open-file relativizer
+        const name = res.vault.replace(/\\/g, '/').split('/').filter(Boolean).pop();
+        setVault(name ?? res.vault);
+        saveSession({ vaultPath: res.vault });
+        const payload = await refreshGraph();
+        const paths = new Set(payload?.nodes.map((n) => n.path) ?? []);
+        const target =
+          restoreNote && paths.has(restoreNote)
+            ? restoreNote
+            : payload
+              ? firstNotePath(payload.nodes)
+              : undefined;
+        if (target) await openNote(target);
+      } catch (e) {
+        console.error('open vault failed:', e);
+      }
+    },
+    [refreshGraph, openNote],
+  );
+
   const openVaultFlow = useCallback(async () => {
     if (!inTauri()) return;
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const dir = await open({ directory: true, multiple: false });
-      if (typeof dir !== 'string') return;
-      const res = await openVault(dir);
-      vaultRootRef.current = res.vault; // absolute root, for the Open-file relativizer
-      const name = res.vault.replace(/\\/g, '/').split('/').filter(Boolean).pop();
-      setVault(name ?? res.vault);
-      const payload = await refreshGraph();
-      const first = payload ? firstNotePath(payload.nodes) : undefined;
-      if (first) await openNote(first);
+      if (typeof dir === 'string') await openVaultByPath(dir);
     } catch (e) {
       console.error('open vault failed:', e);
     }
-  }, [refreshGraph, openNote]);
+  }, [openVaultByPath]);
 
   useEffect(() => {
     if (!inTauri()) return;
@@ -342,6 +364,21 @@ export function Shell() {
       unRebuilt?.();
     };
   }, [refreshGraph]);
+
+  // Persist the active rail view so the app resumes on the same pane.
+  useEffect(() => {
+    saveSession({ railView });
+  }, [railView]);
+
+  // Boot: resume into the last vault + note + view (theme restores via initTheme). Best-
+  // effort — a missing/moved vault just lands on the empty state. Runs once.
+  useEffect(() => {
+    if (!inTauri()) return;
+    const s = loadSession();
+    if (s.railView) setRailView(s.railView);
+    if (s.vaultPath) void openVaultByPath(s.vaultPath, s.notePath);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore once on mount
+  }, []);
 
   // Phase 8: while the Activity view is open, tail CC sessions (read-only, ADR-20260617
   // M1). In-vault events pulse their node (read=violet/modify=rose); all events list in
