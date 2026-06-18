@@ -101,6 +101,12 @@ export const activityStart = (generation: number) =>
 export const activityStop = (generation: number) =>
   invoke<void>('activity_stop', { generation });
 
+/** M2 hook (ADR-20260617). plan = read-only dry-run; arm/disarm WRITE ~/.claude/settings.json
+ *  (backup + atomic + re-validate-all-hooks) and are gated behind an explicit UI confirm. */
+export const activityHookPlan = () => invoke<string>('activity_hook_plan');
+export const activityHookArm = () => invoke<string>('activity_hook_arm');
+export const activityHookDisarm = () => invoke<string>('activity_hook_disarm');
+
 export const onActivityEvent = (cb: (e: ActivityEvent) => void): Promise<UnlistenFn> =>
   listen<ActivityEvent>('activity:event', (e) => cb(e.payload));
 /** Cumulative count of events dropped by the backend per-tick overflow cap. */

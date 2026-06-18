@@ -144,3 +144,13 @@
 .sp-btn:disabled {
   opacity: 0.5;
 }
+.sp-hook-actions {
+  display: flex;
+  gap: 6px;
+}
+.sp-hook-msg {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+  word-break: break-all;
+}

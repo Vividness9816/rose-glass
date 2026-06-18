@@ -7,14 +7,16 @@
 //! check, because a count passes a merge that silently *replaces* a safety hook),
 //! and computes the uninstall (round-trip).
 //!
-//! THERE IS NO `fs::write` IN THIS MODULE. It cannot mutate `settings.json`. Arming
-//! the live mutation is a deliberate, attended, user-OK'd FUTURE act, gated behind
-//! explicit confirmation + a printed timestamped backup + this dry-run diff. The
-//! mechanism shipped for A6 is M1 (transcript-tail, `activity.rs`); M2 is the
-//! deferred latency enhancement whose *plan* is captured-and-tested here.
+//! The pure plan/validate/uninstall above are the "aiming". `arm_install`/`disarm`
+//! below are the gated "trigger" (ADR-20260617 arming): they `fs::write`, but ONLY
+//! after re-validating that every pre-existing hook survives, and ONLY behind a
+//! timestamped backup + an atomic temp-write/rename. The caller gates them behind the
+//! user's explicit in-app OK + a shown dry-run. M1 (transcript-tail, `activity.rs`) is
+//! the always-on mechanism; M2 (this hook) is the opt-in lower-latency enhancement.
 
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
+use std::path::Path;
 
 /// Marker inside OUR hook command — makes install idempotent and lets uninstall find
 /// exactly our entry (never a foreign one) to remove.
@@ -184,6 +186,79 @@ pub fn dry_run_summary(settings_json: &str) -> Result<String, String> {
     ))
 }
 
+fn parse(s: &str) -> Result<Value, String> {
+    serde_json::from_str(s).map_err(|e| e.to_string())
+}
+
+/// Back up `path` (timestamped, same dir) then atomically write `contents` over it.
+/// Returns the backup path. Backup-before-write + fsync makes the mutation reversible
+/// and crash-durable; the rename is atomic so a crash never leaves a half-written file.
+fn backup_and_write(path: &Path, contents: &str) -> Result<String, String> {
+    use std::io::Write;
+    let dir = path.parent().ok_or("settings path has no parent dir")?;
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("settings.json");
+    let backup = dir.join(format!("{name}.rose-backup-{ts}"));
+    std::fs::copy(path, &backup).map_err(|e| format!("backup failed: {e}"))?;
+    let mut tmp = tempfile::NamedTempFile::new_in(dir).map_err(|e| e.to_string())?;
+    tmp.write_all(contents.as_bytes()).map_err(|e| e.to_string())?;
+    tmp.flush().map_err(|e| e.to_string())?;
+    tmp.as_file().sync_all().map_err(|e| e.to_string())?;
+    tmp.persist(path).map_err(|e| e.to_string())?;
+    Ok(backup.display().to_string())
+}
+
+/// ARM (writes!) the Rose Glass activity hook into `settings.json`. Re-validates the
+/// merge, then on the SERIALIZED form re-checks every original command survives and our
+/// marker is present, backs up, and atomically writes. Idempotent: `Ok(None)` (no write,
+/// no backup) if already armed. The single mutating install entry point.
+pub fn arm_install(path: &Path) -> Result<Option<String>, String> {
+    let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let plan = plan_install(&json)?;
+    validate_install(&json, &plan)?;
+    if plan.already_installed {
+        return Ok(None);
+    }
+    let merged = serde_json::to_string_pretty(&plan.merged).map_err(|e| e.to_string())?;
+    // Re-derive from the SERIALIZED bytes that will actually hit disk (catch any
+    // serialization-introduced loss before writing — never trust the in-memory plan alone).
+    let before = collect_commands(&parse(&json)?);
+    let after = collect_commands(&parse(&merged)?);
+    for c in &before {
+        if !after.contains(c) {
+            return Err(format!("refusing to write — serialized merge dropped a hook: {c}"));
+        }
+    }
+    if !after.iter().any(|c| c.contains(HOOK_MARKER)) {
+        return Err("refusing to write — serialized merge lost the rose-glass hook".into());
+    }
+    Ok(Some(backup_and_write(path, &merged)?))
+}
+
+/// DISARM (writes!): remove ONLY our marked hook, backing up + atomically writing the
+/// restored config. `Ok(false)` (no write) if not armed. Refuses if removal would touch
+/// any non-rose command (defense in depth over `plan_uninstall`).
+pub fn disarm(path: &Path) -> Result<bool, String> {
+    let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let restored = plan_uninstall(&json)?;
+    let before = collect_commands(&parse(&json)?);
+    let after = collect_commands(&restored);
+    if after == before {
+        return Ok(false); // nothing marked → not armed
+    }
+    for c in &before {
+        if !c.contains(HOOK_MARKER) && !after.contains(c) {
+            return Err(format!("refusing to write — disarm would drop a non-rose hook: {c}"));
+        }
+    }
+    let restored_str = serde_json::to_string_pretty(&restored).map_err(|e| e.to_string())?;
+    backup_and_write(path, &restored_str)?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,6 +388,32 @@ mod tests {
         let s = dry_run_summary(fixture()).unwrap();
         assert!(s.contains("uninstall_roundtrips=true"), "{s}");
         assert!(s.contains("would_add=1"), "{s}");
+    }
+
+    #[test]
+    fn arm_then_disarm_round_trips_on_a_temp_copy() {
+        // Operates on a TEMP byte-copy of the fixture — never the live settings.json.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, fixture()).unwrap();
+        let before = collect_commands(&serde_json::from_str(fixture()).unwrap());
+
+        // arm → writes merged + a timestamped backup; file keeps every original + our hook
+        let backup = arm_install(&path).unwrap().expect("armed (was not installed)");
+        assert!(std::path::Path::new(&backup).exists(), "backup file written before the mutation");
+        let armed = collect_commands(&serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap());
+        assert!(armed.iter().any(|c| c.contains(HOOK_MARKER)), "armed file carries our hook");
+        for c in &before {
+            assert!(armed.contains(c), "armed file preserved every original hook ({c})");
+        }
+
+        assert!(arm_install(&path).unwrap().is_none(), "re-arming is an idempotent no-op");
+
+        // disarm → restores the EXACT original command set; second disarm is a no-op
+        assert!(disarm(&path).unwrap(), "disarm removed our hook");
+        let restored = collect_commands(&serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap());
+        assert_eq!(restored, before, "disarm restores the original command set exactly");
+        assert!(!disarm(&path).unwrap(), "second disarm is a no-op");
     }
 
     /// Proves the plan against the REAL live settings.json on demand (no commit, no

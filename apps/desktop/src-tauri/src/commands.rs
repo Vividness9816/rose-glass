@@ -305,3 +305,29 @@ pub async fn activity_hook_plan() -> Result<String, IpcError> {
     let json = std::fs::read_to_string(&path)?;
     crate::installer::dry_run_summary(&json).map_err(IpcError)
 }
+
+/// Phase 8 / M2 ARMING (writes ~/.claude/settings.json) — gated: the frontend shows the
+/// dry-run + an explicit confirm before calling this. Re-validates every existing hook
+/// survives, backs up (timestamped), and atomically writes. Idempotent.
+#[tauri::command]
+pub async fn activity_hook_arm() -> Result<String, IpcError> {
+    let path = crate::activity::cc_settings_path()
+        .ok_or_else(|| IpcError("cannot resolve ~/.claude/settings.json".into()))?;
+    match crate::installer::arm_install(&path).map_err(IpcError)? {
+        Some(backup) => Ok(format!("Armed — every existing hook preserved. Backup: {backup}")),
+        None => Ok("Already armed — no change.".into()),
+    }
+}
+
+/// Phase 8 / M2 DISARM (writes ~/.claude/settings.json) — removes only the rose-glass
+/// hook, backs up + atomically writes the restored config.
+#[tauri::command]
+pub async fn activity_hook_disarm() -> Result<String, IpcError> {
+    let path = crate::activity::cc_settings_path()
+        .ok_or_else(|| IpcError("cannot resolve ~/.claude/settings.json".into()))?;
+    if crate::installer::disarm(&path).map_err(IpcError)? {
+        Ok("Disarmed — the rose-glass hook was removed.".into())
+    } else {
+        Ok("Not armed — nothing to remove.".into())
+    }
+}

@@ -44,6 +44,8 @@ pub fn run() {
             commands::activity_start,
             commands::activity_stop,
             commands::activity_hook_plan,
+            commands::activity_hook_arm,
+            commands::activity_hook_disarm,
             terminal::pty_spawn,
             terminal::pty_write,
             terminal::pty_resize,
