@@ -69,6 +69,11 @@ pub fn spawn(
                     let Some(rel) = pipeline::normalize_rel(&handler_root, path) else {
                         continue;
                     };
+                    // Same skip floor as full_rebuild/incremental — a markdown file under
+                    // node_modules/.git/etc. must never enter the graph (A3 convergence).
+                    if pipeline::should_skip(&rel) {
+                        continue;
+                    }
                     // Existence is the source of truth, NOT the event kind. An atomic save
                     // (temp-write + rename-over-target) can surface a Remove event for the
                     // target even though the file is still there; treating that as a delete

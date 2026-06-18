@@ -4,6 +4,13 @@
 **Status:** Approved (brainstorming gate passed). Build against this + the v2.0 founding ADR.
 **Branch:** `feat/v2.0`
 
+> **BINDING OVERRIDE:** `~/.claude/second-brain/decisions/ADR-20260618-rose-glass-v2-architecture.md`
+> revises items 2a/2b/2c, 5/6, and the CSP/symlink details below to preserve the A3 invariant
+> and remove three data-integrity hazards. Where the ADR and this spec differ, **the ADR wins.**
+> Key deltas: 2c column already exists (DELETE stale rows, no startup re-embed); 2a caches the
+> model in AppState (no cache-dir wipe); watcher uses coalesce-at-enqueue (not sync_channel);
+> one shared `should_skip` across all 3 write paths; CSP starts wider then tightens.
+
 ## Goal
 
 Seven changes to the shipped v1.0 PKM: drag-drop ingest, an embed/scale/durability fix
