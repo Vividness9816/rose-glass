@@ -24,13 +24,10 @@ function GraphPaneInner({
   onRetryCluster,
   pulseRef,
   onOpenNode,
-  activePath,
 }: {
   theme: Theme;
   data?: GraphData;
   onOpenVault?: () => void;
-  /** The open note's path — the centre of "Focus" (local-graph) scope. */
-  activePath?: string | null;
   onCluster?: () => void;
   clustering?: boolean;
   /** v2.0: a failed embedding-model load (the ~90MB fetch) → show a Retry. */
@@ -46,11 +43,6 @@ function GraphPaneInner({
   const rendererRef = useRef<GraphRendererLike | null>(null);
   const onOpenNodeRef = useRef(onOpenNode);
   onOpenNodeRef.current = onOpenNode;
-  const [scope, setScope] = useState<'all' | 'focus'>('all'); // graph scope: whole graph vs local
-  const scopeRef = useRef(scope);
-  scopeRef.current = scope;
-  const activePathRef = useRef(activePath);
-  activePathRef.current = activePath;
   const [gpuOn, setGpuOn] = useState(false); // user intent: try the WebGPU path
   const [gpuAvailable, setGpuAvailable] = useState<boolean | null>(null); // null = probing
   const [gpuReason, setGpuReason] = useState('probing…');
@@ -125,7 +117,7 @@ function GraphPaneInner({
       rendererRef.current = r;
       const s = sizeCanvas(); // honor any resize that landed during the async build
       r.setSize(s.w, s.h, s.dpr);
-      r.setFocus(scopeRef.current === 'focus' ? (activePathRef.current ?? null) : null); // re-apply focus after a rebuild
+      r.setFocus(null); // hover drives focus now; start un-dimmed
       r.setConfig(configRef.current); // re-apply the user's physics to the fresh renderer
       r.start();
     };
@@ -174,11 +166,6 @@ function GraphPaneInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key on the color values, not the array identity
   }, [config.clusterColors.join('|')]);
 
-  // Local-graph focus: dim everything but the open note + its neighbours (or clear it).
-  useEffect(() => {
-    rendererRef.current?.setFocus(scope === 'focus' ? (activePath ?? null) : null);
-  }, [scope, activePath]);
-
   // Phase 4 — pan / zoom / drag / click-open. Native listeners (wheel needs
   // passive:false to preventDefault); all forward to the live renderer's camera.
   useEffect(() => {
@@ -217,7 +204,9 @@ function GraphPaneInner({
       if (!r) return;
       const [sx, sy] = at(e);
       if (drag.mode === 'none') {
-        canvas.style.cursor = r.pickAtScreen(sx, sy) ? 'pointer' : 'default';
+        const hit = r.pickAtScreen(sx, sy);
+        canvas.style.cursor = hit ? 'pointer' : 'default';
+        r.setFocus(hit ? hit.path : null); // hover → highlight node + 1-hop neighbors, dim rest
         return;
       }
       if (Math.abs(sx - drag.dx0) + Math.abs(sy - drag.dy0) > 3) drag.moved = true;
@@ -231,7 +220,7 @@ function GraphPaneInner({
       if (r && drag.mode === 'node' && !drag.moved) {
         const [sx, sy] = at(e);
         const n = r.pickAtScreen(sx, sy);
-        if (n) onOpenNodeRef.current?.(n.path); // click (no drag) → open
+        if (n && !n.ghost) onOpenNodeRef.current?.(n.path); // click (no drag) → open (ghosts aren't openable)
       }
       r?.setDragging(null);
       drag.mode = 'none';
@@ -243,17 +232,20 @@ function GraphPaneInner({
         /* pointer already released */
       }
     };
+    const onLeave = () => rendererRef.current?.setFocus(null); // leaving the canvas clears the hover highlight
     canvas.addEventListener('wheel', onWheel, { passive: false });
     canvas.addEventListener('pointerdown', onDown);
     canvas.addEventListener('pointermove', onMove);
     canvas.addEventListener('pointerup', onUp);
     canvas.addEventListener('pointercancel', onUp);
+    canvas.addEventListener('pointerleave', onLeave);
     return () => {
       canvas.removeEventListener('wheel', onWheel);
       canvas.removeEventListener('pointerdown', onDown);
       canvas.removeEventListener('pointermove', onMove);
       canvas.removeEventListener('pointerup', onUp);
       canvas.removeEventListener('pointercancel', onUp);
+      canvas.removeEventListener('pointerleave', onLeave);
     };
     // gpuOn re-runs this so listeners re-attach to the fresh canvas after the
     // backend toggle remounts it (via the JSX key).
@@ -272,25 +264,6 @@ function GraphPaneInner({
               Open vault…
             </button>
           )}
-          <button
-            className={`gc-btn${scope === 'all' ? ' active' : ''}`}
-            type="button"
-            onClick={() => setScope('all')}
-            aria-pressed={scope === 'all'}
-            title="Show the whole graph"
-          >
-            All
-          </button>
-          <button
-            className={`gc-btn${scope === 'focus' ? ' active' : ''}`}
-            type="button"
-            onClick={() => setScope('focus')}
-            disabled={!activePath}
-            aria-pressed={scope === 'focus'}
-            title={activePath ? 'Focus the open note + its links' : 'Open a note to focus its local graph'}
-          >
-            Focus
-          </button>
           <button
             className="gc-btn"
             type="button"

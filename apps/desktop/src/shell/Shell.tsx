@@ -724,7 +724,6 @@ export function Shell() {
         <GraphPane
           theme={theme}
           data={graphData}
-          activePath={note?.path ?? null}
           onOpenVault={openVaultFlow}
           onCluster={onCluster}
           clustering={clustering}
