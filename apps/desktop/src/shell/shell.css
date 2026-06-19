@@ -124,9 +124,12 @@
 .sb-spacer { flex: 1; }
 
 /* ── Main split ── */
+/* --rg-split (graph's share, 0..1) is set inline by the Shell from the persisted/clamped
+   value and driven imperatively while dragging the .splitter-x seam. */
 .main-area {
+  position: relative; /* anchor the absolute vertical splitter */
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: calc(var(--rg-split, 0.5) * 100%) minmax(0, 1fr);
   overflow: hidden;
 }
 

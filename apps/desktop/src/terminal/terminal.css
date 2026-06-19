@@ -5,7 +5,9 @@
   left: 52px; /* clear the icon rail */
   right: 0;
   bottom: 28px; /* clear the statusbar */
-  height: 300px;
+  /* --rg-term-h set inline by the Shell (persisted/clamped) + driven imperatively while
+     dragging the .splitter-y top edge. */
+  height: var(--rg-term-h, 300px);
   display: flex;
   flex-direction: column;
   background: var(--glass-bg);

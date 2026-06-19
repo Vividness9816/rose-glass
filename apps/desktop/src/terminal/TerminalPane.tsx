@@ -185,10 +185,16 @@ export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention
     };
     host.addEventListener('contextmenu', onContextMenu);
 
+    let resizeRaf: number | undefined;
     const ro = new ResizeObserver(() => {
       try {
-        fit.fit();
-        if (id >= 0) void ptyResize(id, term.cols, term.rows);
+        fit.fit(); // cheap + synchronous — refit every frame is fine
+        // Coalesce the PTY resize (an IPC round-trip into ConPTY master.resize()) to one per
+        // frame so a splitter / window-edge drag storm can't garble ConPTY reflow.
+        if (resizeRaf !== undefined) cancelAnimationFrame(resizeRaf);
+        resizeRaf = requestAnimationFrame(() => {
+          if (!disposed && id >= 0) void ptyResize(id, term.cols, term.rows);
+        });
       } catch {
         /* host detached mid-resize */
       }
@@ -199,6 +205,7 @@ export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention
     return () => {
       disposed = true;
       if (settleTimer !== undefined) clearTimeout(settleTimer);
+      if (resizeRaf !== undefined) cancelAnimationFrame(resizeRaf);
       ro.disconnect();
       host.removeEventListener('contextmenu', onContextMenu);
       unOut?.();
