@@ -134,7 +134,12 @@
 }
 
 /* ── Editor pane ── */
+/* v2.2: container context so the chrome rows (breadcrumb, note-meta) adapt to the PANE's
+   width — meaningful now that v2.1 made the pane user-resizable. Safe: the only absolute
+   descendant (the Outline/Properties popover) anchors to .editor-header (position:relative),
+   and CodeMirror here runs no fixed-position tooltips/autocomplete. */
 .editor-pane {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -243,6 +248,24 @@
   gap: 16px;
 }
 .note-meta span { display: flex; align-items: center; gap: 4px; }
+
+/* v2.2 container queries — respond to the editor PANE width (not the viewport), so a narrow
+   pane (dragged small via the v2.1 splitter) stays legible. Breakpoints are the pane's
+   inline-size; tune to where the rows actually break. */
+@container (max-width: 480px) {
+  /* the 4 mono meta chips wrap to multiple lines instead of clipping */
+  .note-meta {
+    flex-wrap: wrap;
+    gap: 6px 16px;
+  }
+}
+@container (max-width: 420px) {
+  /* collapse the breadcrumb to just the current note so it can't collide with the actions */
+  .breadcrumb .bc-seg,
+  .breadcrumb .bc-sep {
+    display: none;
+  }
+}
 .note-body { font-size: 14px; font-weight: 400; color: var(--text-2); line-height: 1.8; max-width: 620px; }
 .note-body p { margin-bottom: 16px; }
 .note-body h2 {
