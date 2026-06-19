@@ -51,6 +51,109 @@
   border-radius: 3px;
 }
 
+/* v2.3 — read-only rendered-Markdown view (the Edit/Read 'Read' mode). Token-driven. */
+.reading-view {
+  max-width: 620px;
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text-1);
+  padding-bottom: 40px;
+}
+.reading-view h1,
+.reading-view h2,
+.reading-view h3,
+.reading-view h4,
+.reading-view h5,
+.reading-view h6 {
+  color: var(--text-1);
+  line-height: 1.3;
+  margin: 1.4em 0 0.5em;
+  font-weight: 600;
+}
+.reading-view h1 {
+  font-size: 1.7em;
+}
+.reading-view h2 {
+  font-size: 1.4em;
+}
+.reading-view h3 {
+  font-size: 1.2em;
+}
+.reading-view p {
+  margin: 0.7em 0;
+}
+.reading-view a {
+  color: var(--rose-bright);
+  text-decoration: none;
+}
+.reading-view a:hover {
+  text-decoration: underline;
+}
+.reading-view ul,
+.reading-view ol {
+  margin: 0.7em 0;
+  padding-left: 1.6em;
+}
+.reading-view li {
+  margin: 0.2em 0;
+}
+.reading-view blockquote {
+  margin: 0.8em 0;
+  padding: 0.2em 1em;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-2);
+}
+.reading-view code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  color: var(--text-2);
+  background: var(--surface-3);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.reading-view pre {
+  margin: 0.8em 0;
+  padding: 12px 14px;
+  background: var(--surface-3);
+  border-radius: var(--r-sm);
+  overflow-x: auto;
+}
+.reading-view pre code {
+  background: none;
+  padding: 0;
+}
+.reading-view hr {
+  border: none;
+  border-top: 1px solid var(--border-mid);
+  margin: 1.4em 0;
+}
+.reading-view img {
+  max-width: 100%;
+  border-radius: var(--r-sm);
+}
+.reading-view table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+}
+.reading-view th,
+.reading-view td {
+  border: 1px solid var(--border-mid);
+  padding: 5px 10px;
+}
+.rg-wikilink {
+  color: var(--rose-bright);
+  background: var(--rose-glow-sm);
+  padding: 1px 5px;
+  border-radius: 3px;
+  border-bottom: 1px solid var(--border-strong);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.rg-wikilink:hover {
+  background: var(--rose-glow);
+}
+
 /* Fallback for an unsupported binary (kind === 'other'); pdf/docx now route to their
    view engines (PdfView / DocxView). Token-driven. */
 .format-placeholder {
