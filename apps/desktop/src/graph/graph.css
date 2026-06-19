@@ -93,27 +93,29 @@
   z-index: 1;
 }
 
-/* v2.0 — graph settings (physics/colors) panel, top-right of the graph */
+/* v2.0 — graph settings (physics/colors) panel, top-right of the graph. Glass chrome
+   over the living backdrop: uses the system --glass-* tokens (not opaque surfaces). */
 .gcfg-gear,
 .gcfg-panel {
   position: absolute;
   top: 44px;
   right: 10px;
-  z-index: 5;
+  z-index: 5; /* above .graph-canvas + .graph-fade (1); local to .graph-pane */
   font-family: var(--font-mono);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 .gcfg-gear {
+  display: grid;
+  place-items: center;
   width: 24px;
   height: 24px;
-  border-radius: 6px;
-  border: 1px solid var(--border-mid);
-  background: var(--surface-2, rgba(20, 16, 22, 0.55));
-  color: var(--text-3);
-  font-size: 12px;
+  border-radius: var(--r-sm);
+  color: var(--text-2);
   cursor: default;
-  transition: all var(--dur-fast) var(--ease);
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
 }
 .gcfg-gear:hover {
   color: var(--text-1);
@@ -121,16 +123,26 @@
 }
 .gcfg-panel {
   width: 208px;
-  padding: 10px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  border-radius: 8px;
-  border: 1px solid var(--border-mid);
-  background: var(--surface-2, rgba(20, 16, 22, 0.82));
+  gap: 9px;
+  border-radius: var(--r-md);
   color: var(--text-2);
   font-size: 10px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 10px 34px rgba(10, 4, 8, 0.5); /* rose-black, the --bg hue */
+  transform-origin: top right;
+  animation: gcfg-in var(--dur-norm) var(--ease-out);
+}
+@keyframes gcfg-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 .gcfg-head {
   display: flex;
@@ -142,10 +154,12 @@
 .gcfg-x {
   background: none;
   border: none;
+  padding: 0 2px;
   color: var(--text-3);
   font-size: 14px;
   line-height: 1;
   cursor: default;
+  transition: color var(--dur-fast) var(--ease);
 }
 .gcfg-x:hover {
   color: var(--rose-bright);
@@ -164,7 +178,7 @@
 }
 .gcfg-label {
   width: 62px;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .gcfg-row input[type='range'] {
   flex: 1;
@@ -183,10 +197,32 @@
   height: 18px;
   padding: 0;
   border: 1px solid var(--border-mid);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   background: none;
   cursor: default;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.gcfg-swatch:hover {
+  border-color: var(--border-strong);
 }
 .gcfg-reset {
   align-self: flex-end;
+}
+/* Keyboard focus — visible ring for every interactive control (mouse hover unaffected) */
+.gcfg-gear:focus-visible,
+.gcfg-x:focus-visible,
+.gcfg-swatch:focus-visible,
+.gcfg-row input[type='range']:focus-visible {
+  outline: 1px solid var(--rose);
+  outline-offset: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gcfg-panel {
+    animation: none;
+  }
+  .gcfg-gear,
+  .gcfg-x,
+  .gcfg-swatch {
+    transition: none;
+  }
 }
