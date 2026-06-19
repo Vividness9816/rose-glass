@@ -3,7 +3,7 @@
    Rust save path; the watcher reindexes and index events refresh backlinks/meta
    (with an anti-clobber guard so a user's in-progress buffer is never stomped). */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { getStoredTheme, toggleTheme, type Theme } from '../appearance/theme';
 import type { GraphData } from '../graph/types';
 import { payloadToGraphData } from '../graph/fromPayload';
@@ -20,7 +20,11 @@ import { editorKind } from '../editor/editorKind';
 import { siblingMdPath, toVaultRelative } from '../editor/fileOpen';
 import { GraphPane } from '../graph/GraphPane';
 import { Backdrop } from '../backdrop/Backdrop';
-import { TerminalPane } from '../terminal/TerminalPane';
+// v2.2: lazy so xterm (eager, heavy) leaves the boot chunk; the terminal is hidden until
+// Ctrl+` and only mounted when terminals.length > 0, so this loads on first open — no FMP cost.
+const TerminalPane = lazy(() =>
+  import('../terminal/TerminalPane').then((m) => ({ default: m.TerminalPane })),
+);
 import { isUnattended } from '../terminal/attention';
 import { Splitter } from './Splitter';
 import { clampFraction, clampPx, nextFraction, TERM_H_DEFAULT, TERM_H_MIN } from './splitLogic';
@@ -847,15 +851,17 @@ export function Shell() {
             </button>
           </div>
           <div className="terminal-body">
-            {terminals.map((id) => (
-              <div
-                key={id}
-                className="terminal-tabpane"
-                style={{ display: id === activeTerm ? 'flex' : 'none' }}
-              >
-                <TerminalPane theme={theme} onAttention={() => markTermAttention(id)} />
-              </div>
-            ))}
+            <Suspense fallback={null}>
+              {terminals.map((id) => (
+                <div
+                  key={id}
+                  className="terminal-tabpane"
+                  style={{ display: id === activeTerm ? 'flex' : 'none' }}
+                >
+                  <TerminalPane theme={theme} onAttention={() => markTermAttention(id)} />
+                </div>
+              ))}
+            </Suspense>
           </div>
         </div>
       )}
