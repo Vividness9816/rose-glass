@@ -204,9 +204,9 @@ function GraphPaneInner({
       if (!r) return;
       const [sx, sy] = at(e);
       if (drag.mode === 'none') {
-        const hit = r.pickAtScreen(sx, sy);
-        canvas.style.cursor = hit ? 'pointer' : 'default';
-        r.setFocus(hit ? hit.path : null); // hover → highlight node + 1-hop neighbors, dim rest
+        canvas.style.cursor = r.pickAtScreen(sx, sy) ? 'pointer' : 'default'; // strict: pointer only when clickable
+        const near = r.pickAtScreen(sx, sy, 22); // forgiving hover radius → highlight + label the nearest node
+        r.setFocus(near ? near.path : null);
         return;
       }
       if (Math.abs(sx - drag.dx0) + Math.abs(sy - drag.dy0) > 3) drag.moved = true;
