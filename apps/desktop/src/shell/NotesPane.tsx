@@ -1,6 +1,7 @@
 /* Notes pane (rail ≡) — the full note list from the index; clicking opens a note.
    Presentational; the note list comes from the live graph data in Shell. */
 
+import { Icon } from '../icons/Icon';
 import './panes.css';
 
 interface NoteItem {
@@ -21,7 +22,9 @@ export function NotesPane({
   return (
     <div className="side-pane">
       <div className="sp-header">
-        <span className="sp-glyph">≡</span>
+        <span className="sp-glyph">
+          <Icon name="notes" size="sm" />
+        </span>
         <span className="sp-title">notes</span>
         <span className="sp-count">{notes.length}</span>
       </div>

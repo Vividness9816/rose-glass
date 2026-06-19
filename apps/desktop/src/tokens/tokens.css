@@ -86,6 +86,12 @@
   --r-lg: 14px;
   --r-xl: 20px;
 
+  /* Icon sizes (v2.2) — aligned to the control heights icons sit in. Stroke stays 1.5px at
+     every size (set in Icon.tsx) so the set reads as one family; theme-independent. */
+  --icon-sm: 13px;
+  --icon-md: 15px;
+  --icon-lg: 18px;
+
   /* Motion */
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-out: cubic-bezier(0, 0, 0.2, 1);

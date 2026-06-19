@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { getTags, inTauri, type TagCount } from '../ipc';
+import { Icon } from '../icons/Icon';
 import './panes.css';
 
 export function TagsPane({ onTag }: { onTag: (tag: string) => void }) {
@@ -32,7 +33,9 @@ export function TagsPane({ onTag }: { onTag: (tag: string) => void }) {
   return (
     <div className="side-pane">
       <div className="sp-header">
-        <span className="sp-glyph">◈</span>
+        <span className="sp-glyph">
+          <Icon name="tags" size="sm" />
+        </span>
         <span className="sp-title">tags</span>
         <span className="sp-count">{tags.length}</span>
       </div>

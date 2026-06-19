@@ -9,6 +9,7 @@ import { GraphRenderer } from './GraphRenderer';
 import type { GraphRendererLike } from './Renderer';
 import { WebGpuGraphRenderer } from './webgpu/WebGpuGraphRenderer';
 import { probeWebGpu } from './webgpu/probe';
+import { Icon } from '../icons/Icon';
 import './graph.css';
 
 /** Graph pane: mockup chrome + the live canvas-2D graph. Uses `data` (from the
@@ -261,7 +262,9 @@ function GraphPaneInner({
   return (
     <div className="graph-pane">
       <div className="graph-header">
-        <span className="graph-glyph">⬡</span>
+        <span className="graph-glyph">
+          <Icon name="graph" size="sm" />
+        </span>
         <span className="graph-title">knowledge graph</span>
         <div className="graph-controls">
           {onOpenVault && (
@@ -305,7 +308,7 @@ function GraphPaneInner({
               title={`Embedding model failed to load: ${clusterError}`}
               style={{ color: 'var(--rose, #e0607e)' }}
             >
-              ⚠ Retry
+              <Icon name="warning" size={12} /> Retry
             </button>
           )}
           <button

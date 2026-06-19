@@ -4,24 +4,7 @@
 
 import { useState } from 'react';
 import { DEFAULT_CONFIG, type GraphConfig } from './config';
-
-/** Monochrome sliders glyph (inherits currentColor — themeable, never an emoji). Says
-    "tune" more honestly than a gear, since the panel IS sliders. */
-function SlidersIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-      <line x1="21" y1="5" x2="13" y2="5" />
-      <line x1="9" y1="5" x2="3" y2="5" />
-      <line x1="13" y1="3" x2="13" y2="7" />
-      <line x1="21" y1="12" x2="15" y2="12" />
-      <line x1="11" y1="12" x2="3" y2="12" />
-      <line x1="15" y1="10" x2="15" y2="14" />
-      <line x1="21" y1="19" x2="11" y2="19" />
-      <line x1="7" y1="19" x2="3" y2="19" />
-      <line x1="11" y1="17" x2="11" y2="21" />
-    </svg>
-  );
-}
+import { Icon } from '../icons/Icon';
 
 type SliderKey = 'gravity' | 'repulsion' | 'drift' | 'damping' | 'centerPull';
 const SLIDERS: { key: SliderKey; label: string; min: number; max: number; step: number; hint: string }[] = [
@@ -71,7 +54,7 @@ export function GraphConfigPanel({
         title="Graph settings"
         aria-label="Graph settings"
       >
-        <SlidersIcon />
+        <Icon name="sliders" size={13} />
       </button>
     );
   }
@@ -81,7 +64,7 @@ export function GraphConfigPanel({
       <div className="gcfg-head">
         <span>graph physics</span>
         <button className="gcfg-x" type="button" onClick={() => setOpen(false)} aria-label="Close settings">
-          ×
+          <Icon name="close" size={13} />
         </button>
       </div>
 

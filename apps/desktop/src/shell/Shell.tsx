@@ -39,6 +39,7 @@ import {
 } from '../activity/ring';
 import { Titlebar } from './Titlebar';
 import { IconRail } from './IconRail';
+import { Icon } from '../icons/Icon';
 import { EditorPane } from './EditorPane';
 import { StatusBar } from './StatusBar';
 import { NotesPane } from './NotesPane';
@@ -871,7 +872,7 @@ export function Shell() {
                     title="Close terminal (ends its process)"
                     aria-label={`Close terminal ${i + 1}`}
                   >
-                    ×
+                    <Icon name="close" size={13} />
                   </button>
                 </div>
               ))}
@@ -882,7 +883,7 @@ export function Shell() {
                 title="New terminal"
                 aria-label="New terminal"
               >
-                +
+                <Icon name="plus" size={13} />
               </button>
             </div>
             <button
@@ -892,7 +893,7 @@ export function Shell() {
               title="Hide terminal (Ctrl+`) — keeps it running"
               aria-label="Hide terminal"
             >
-              ▾
+              <Icon name="chevronDown" size={13} />
             </button>
           </div>
           <div className="terminal-body">

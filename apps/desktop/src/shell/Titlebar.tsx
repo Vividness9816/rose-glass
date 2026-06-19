@@ -1,6 +1,8 @@
 /* Titlebar — draggable, traffic lights wired to the Tauri window (no-op
    outside Tauri, e.g. under plain Vite / Playwright), right action cluster. */
 
+import { Icon } from '../icons/Icon';
+
 async function windowAction(action: 'close' | 'minimize' | 'toggleMaximize' | 'toggleFullscreen') {
   try {
     const { getCurrentWindow } = await import('@tauri-apps/api/window');
@@ -70,7 +72,7 @@ export function Titlebar({
           title="Toggle fullscreen"
           aria-label="Toggle fullscreen"
         >
-          ⛶
+          <Icon name="fullscreen" size="sm" />
         </button>
         <button className="tb-btn" type="button" onClick={onSearch}>⌘K Search</button>
         <button
@@ -80,7 +82,7 @@ export function Titlebar({
           disabled={!canOpenFile}
           title={canOpenFile ? 'Open a PDF / Word doc / note from the vault' : 'Open a vault first'}
         >
-          ⎘ Open file
+          <Icon name="file" size="sm" /> Open file
         </button>
         <button
           className="tb-btn"
@@ -89,7 +91,7 @@ export function Titlebar({
           disabled={!canOpenFile}
           title={canOpenFile ? 'Reveal the vault folder in your file explorer' : 'Open a vault first'}
         >
-          ↗ Share
+          <Icon name="share" size="sm" /> Share
         </button>
         <button
           className="tb-btn primary"
@@ -98,7 +100,7 @@ export function Titlebar({
           disabled={!canOpenFile}
           title={canOpenFile ? 'Create a new note' : 'Open a vault first'}
         >
-          + New note
+          <Icon name="plus" size="sm" /> New note
         </button>
       </div>
     </div>

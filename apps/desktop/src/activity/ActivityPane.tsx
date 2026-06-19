@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from 'react';
 import type { ActivityState } from './ring';
+import { Icon } from '../icons/Icon';
 import './activity.css';
 
 function basename(rel: string): string {
@@ -44,7 +45,9 @@ export function ActivityPane({
   return (
     <div className="activity-pane">
       <div className="activity-header">
-        <span className="activity-glyph">◎</span>
+        <span className="activity-glyph">
+          <Icon name="activity" size="sm" />
+        </span>
         <span className="activity-title">claude activity</span>
       </div>
       <div className="activity-health" role="status" aria-live="polite">
