@@ -51,6 +51,8 @@ import {
   getBacklinks,
   getGraphPayload,
   ingestDroppedFile,
+  onOpenFile as onOsOpenFile,
+  takePendingOpenFile,
   getNote,
   inTauri,
   onActivityAnomaly,
@@ -487,6 +489,27 @@ export function Shell() {
     }
   }, [openVaultByPath]);
 
+  // v2.2: open a file handed to us by the OS (double-click / "open with"), arriving via the
+  // single-instance forward (warm) or the cold-start pending file. If a vault is open, ingest
+  // into it (copies outside-vault files into inbox/, exactly like drag-drop); if none is open
+  // yet, open the file's own folder AS the vault so it gets indexed + opened in place.
+  const openExternalFile = useCallback(
+    async (absPath: string) => {
+      try {
+        if (!vaultRootRef.current) {
+          const cut = Math.max(absPath.lastIndexOf('\\'), absPath.lastIndexOf('/'));
+          if (cut > 0) await openVaultByPath(absPath.slice(0, cut));
+        }
+        const r = await ingestDroppedFile(absPath);
+        if (r.kind === 'note') await openNote(r.rel);
+        else openBinary(r.rel);
+      } catch (e) {
+        console.error('open external file failed for', absPath, e);
+      }
+    },
+    [openVaultByPath, openNote, openBinary],
+  );
+
   // Titlebar "+ New note": create a non-colliding Untitled note at the vault root and open it.
   const onNewNote = useCallback(async () => {
     if (!inTauri() || !vaultRootRef.current) return;
@@ -602,6 +625,21 @@ export function Shell() {
     };
   }, [openNote, openBinary]);
 
+  // v2.2: a file opened from the OS while we're ALREADY running — the single-instance plugin
+  // forwarded it (focus + open-file event). Reuse the same ingest/open path as drag-drop.
+  useEffect(() => {
+    if (!inTauri()) return;
+    let active = true;
+    let un: (() => void) | undefined;
+    onOsOpenFile((path) => void openExternalFile(path))
+      .then((u) => (active ? (un = u) : u()))
+      .catch(() => {});
+    return () => {
+      active = false;
+      un?.();
+    };
+  }, [openExternalFile]);
+
   // Persist the active rail view so the app resumes on the same pane.
   useEffect(() => {
     saveSession({ railView });
@@ -613,7 +651,14 @@ export function Shell() {
     if (!inTauri()) return;
     const s = loadSession();
     if (s.railView) setRailView(s.railView);
-    if (s.vaultPath) void openVaultByPath(s.vaultPath, s.notePath);
+    void (async () => {
+      if (s.vaultPath) await openVaultByPath(s.vaultPath, s.notePath);
+      // Cold start: a file this instance was launched with (double-clicked before running).
+      // Sequenced AFTER restore so there's a vault to ingest into (else openExternalFile opens
+      // the file's own folder as the vault).
+      const pending = await takePendingOpenFile();
+      if (pending) await openExternalFile(pending);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- restore once on mount
   }, []);
 

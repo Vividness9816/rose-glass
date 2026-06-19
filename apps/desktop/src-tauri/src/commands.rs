@@ -437,6 +437,14 @@ pub async fn retry_embedding_model(state: State<'_, AppState>) -> Result<(), Ipc
     Ok(())
 }
 
+/// v2.2 cold-start file-open: return + CLEAR the file this instance was launched with (a
+/// double-click before the app was running). The frontend calls this once on boot and opens
+/// the path via the same ingest path as drag-drop. Returns None on a normal launch.
+#[tauri::command]
+pub fn take_pending_open_file(state: State<'_, AppState>) -> Option<String> {
+    lock(&state.pending_open_file).take()
+}
+
 /// Phase 8: start the read-only CC activity tail (ADR-20260617 M1 — transcript-tail
 /// only; no `settings.json` mutation). The `generation` (a monotonic token bumped per
 /// frontend effect run) serializes against `activity_stop` so a StrictMode / rapid

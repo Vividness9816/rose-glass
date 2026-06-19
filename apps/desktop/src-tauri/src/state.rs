@@ -26,6 +26,10 @@ pub struct AppState {
     /// load is remembered so search doesn't silently re-download every call; the Clusters
     /// Retry resets it. See `embed::ModelCache`.
     pub model: Arc<Mutex<crate::embed::ModelCache>>,
+    /// v2.2: a file path this instance was launched with (OS file-open / double-click),
+    /// captured at cold start so the frontend can open it once the webview is ready. The
+    /// warm path (a 2nd launch into an already-running app) goes via the `open-file` event.
+    pub pending_open_file: Mutex<Option<String>>,
 }
 
 impl AppState {
@@ -36,6 +40,7 @@ impl AppState {
             watcher: Mutex::new(None),
             activity: Mutex::new((0, None)),
             model: Arc::new(Mutex::new(crate::embed::ModelCache::default())),
+            pending_open_file: Mutex::new(None),
         }
     }
 }
