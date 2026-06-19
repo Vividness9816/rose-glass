@@ -49,7 +49,6 @@ export function buildMockGraph(W: number, H: number): GraphData {
         phase: Math.random() * Math.PI * 2,
         r: 4 + Math.random() * 3,
         hub: false,
-        ghost: false,
       });
     }
   }

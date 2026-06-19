@@ -220,7 +220,7 @@ function GraphPaneInner({
       if (r && drag.mode === 'node' && !drag.moved) {
         const [sx, sy] = at(e);
         const n = r.pickAtScreen(sx, sy);
-        if (n && !n.ghost) onOpenNodeRef.current?.(n.path); // click (no drag) → open (ghosts aren't openable)
+        if (n) onOpenNodeRef.current?.(n.path); // click (no drag) → open
       }
       r?.setDragging(null);
       drag.mode = 'none';

@@ -17,7 +17,6 @@ export interface GraphNode {
   phase: number; // per-node breathing offset
   r: number; // radius (scales with link count)
   hub: boolean;
-  ghost: boolean; // unresolved-link placeholder — faded + non-openable (no note on disk)
 }
 
 export interface GraphEdge {

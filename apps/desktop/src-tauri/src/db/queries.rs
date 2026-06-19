@@ -70,9 +70,6 @@ pub struct GraphNodeMeta {
     pub title: String,
     pub cluster: Option<i64>,
     pub link_count: i64,
-    /// true = an unresolved-link placeholder (no note on disk yet) — rendered faded +
-    /// non-openable. Keyed by the raw link text (`links.dst_raw`).
-    pub is_ghost: bool,
 }
 
 #[derive(Serialize)]
@@ -450,7 +447,7 @@ pub fn get_tags(conn: &Connection) -> rusqlite::Result<Vec<TagCount>> {
 }
 
 pub fn get_graph_payload(conn: &Connection) -> rusqlite::Result<GraphPayload> {
-    let mut nodes: Vec<GraphNodeMeta> = {
+    let nodes: Vec<GraphNodeMeta> = {
         let mut stmt = conn.prepare(
             "SELECT n.path, n.title, c.cluster_id AS cluster, COUNT(l.src_path) AS link_count
              FROM notes n
@@ -465,13 +462,12 @@ pub fn get_graph_payload(conn: &Connection) -> rusqlite::Result<GraphPayload> {
                 title: r.get(1)?,
                 cluster: r.get::<_, Option<i64>>(2)?,
                 link_count: r.get(3)?,
-                is_ghost: false,
             })
         })?;
         rows.collect::<rusqlite::Result<_>>()?
     };
 
-    let mut edges: Vec<GraphEdgeMeta> = {
+    let edges: Vec<GraphEdgeMeta> = {
         let mut stmt = conn.prepare(
             "SELECT DISTINCT src_path AS src, dst_path AS dst
              FROM links WHERE dst_path IS NOT NULL AND dst_path <> src_path",
@@ -484,47 +480,6 @@ pub fn get_graph_payload(conn: &Connection) -> rusqlite::Result<GraphPayload> {
         })?;
         rows.collect::<rusqlite::Result<_>>()?
     };
-
-    // Ghost nodes (Obsidian parity): one per distinct unresolved link target that isn't
-    // already a real note. Keyed by the raw link text so the ghost node path == the ghost
-    // edge dst (both from dst_raw).
-    {
-        let mut stmt = conn.prepare(
-            "SELECT DISTINCT l.dst_raw
-             FROM links l
-             WHERE l.dst_path IS NULL AND l.dst_raw IS NOT NULL
-               AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.path = l.dst_raw)",
-        )?;
-        let rows = stmt.query_map([], |r| {
-            let raw: String = r.get(0)?;
-            Ok(GraphNodeMeta {
-                path: raw.clone(),
-                title: raw,
-                cluster: None,
-                link_count: 0,
-                is_ghost: true,
-            })
-        })?;
-        for g in rows {
-            nodes.push(g?);
-        }
-
-        let mut estmt = conn.prepare(
-            "SELECT DISTINCT src_path AS src, dst_raw AS dst
-             FROM links
-             WHERE dst_path IS NULL AND dst_raw IS NOT NULL
-               AND NOT EXISTS (SELECT 1 FROM notes n WHERE n.path = dst_raw)",
-        )?;
-        let erows = estmt.query_map([], |r| {
-            Ok(GraphEdgeMeta {
-                src: r.get(0)?,
-                dst: r.get(1)?,
-            })
-        })?;
-        for e in erows {
-            edges.push(e?);
-        }
-    }
 
     Ok(GraphPayload { nodes, edges })
 }
@@ -646,42 +601,5 @@ mod semantic_tests {
         let hits = crate::knn::knn(&qv, &corpus, 2, None);
         assert_eq!(hits[0].path, "pasta.md", "a cooking query ranks the cooking note first");
         assert!(hits[0].score > hits[1].score, "the cooking note scores strictly higher");
-    }
-}
-
-#[cfg(test)]
-mod graph_tests {
-    use super::*;
-
-    fn note(conn: &Connection, path: &str, title: &str) {
-        conn.execute(
-            "INSERT INTO notes (path,title,content_hash,mtime,word_count,indexed_at) VALUES (?1,?2,'h',0,1,0)",
-            params![path, title],
-        )
-        .unwrap();
-    }
-    fn link(conn: &Connection, src: &str, dst: Option<&str>, raw: &str) {
-        conn.execute(
-            "INSERT INTO links (src_path,dst_path,dst_raw,link_type) VALUES (?1,?2,?3,'wikilink')",
-            params![src, dst, raw],
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn ghost_nodes_appear_for_unresolved_links() {
-        let conn = crate::db::open_in_memory().unwrap();
-        crate::db::migrate(&conn).unwrap();
-        note(&conn, "a.md", "A");
-        note(&conn, "b.md", "B");
-        link(&conn, "a.md", Some("b.md"), "b.md"); // resolved
-        link(&conn, "a.md", None, "Missing"); // unresolved → ghost
-
-        let p = get_graph_payload(&conn).unwrap();
-        assert!(p.nodes.iter().any(|n| n.path == "a.md" && !n.is_ghost), "real note is not a ghost");
-        let ghost = p.nodes.iter().find(|n| n.path == "Missing").expect("ghost node for the unresolved target");
-        assert!(ghost.is_ghost && ghost.link_count == 0, "ghost is flagged + has no outgoing links");
-        assert!(p.edges.iter().any(|e| e.src == "a.md" && e.dst == "Missing"), "edge points at the ghost");
-        assert!(p.edges.iter().any(|e| e.src == "a.md" && e.dst == "b.md"), "the resolved edge survives");
     }
 }

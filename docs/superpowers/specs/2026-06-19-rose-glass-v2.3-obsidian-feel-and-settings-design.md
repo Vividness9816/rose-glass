@@ -11,7 +11,7 @@ Two user asks, brainstormed into one staged milestone:
 
 ## Decisions locked (from brainstorming)
 
-- **Graph:** *Remove* the All/Focus toggle. **Hover** a node → highlight it + its 1-hop neighbors, dim the rest. **Labels** hidden until hover (then shown for the hovered node + neighbors). **Ghost nodes:** render unresolved link targets as faded, non-openable nodes (Obsidian parity) — requires a backend change.
+- **Graph:** *Remove* the All/Focus toggle. **Hover** a node → highlight it + its 1-hop neighbors, dim the rest. **Labels** hidden until hover (then shown for the hovered node + neighbors). ~~**Ghost nodes:** render unresolved link targets as faded, non-openable nodes (Obsidian parity).~~ **DROPPED post-eyeball (2026-06-19):** on the real vault this produced ~1100 ghosts vs ~130 real nodes (the home-dir index has huge numbers of unresolved `[[link]]`-like targets) — far too noisy. The graph stays resolved-only. Revisit only behind an off-by-default toggle + an aggressive filter/cap if ever wanted.
 - **Settings:** build the full categorized menu. The two tab-dependent settings require **tabs + a reading mode**, and the user chose to **build those subsystems too** (full parity).
 - **Shape:** one staged spec, 5 legs, low-risk → high-risk order. Each leg builds + passes gates independently. Build leg-by-leg with user review between, matching how v2.0/v2.2 shipped.
 - **Baked-in defaults (user-approved):** add `@replit/codemirror-vim` + `turndown`; reading-mode renderer = `markdown-it` + existing DOMPurify; Help = a generated `help.pdf` opened in RG's own in-app PDF viewer; Check-for-Updates = show version + open the GitHub releases page (NOT the Tauri auto-updater).

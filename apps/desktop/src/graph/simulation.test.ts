@@ -4,7 +4,7 @@ import { DEFAULT_CONFIG, type GraphConfig } from './config';
 import type { GraphNode } from './types';
 
 function node(id: number, x: number, y: number, cluster = 0): GraphNode {
-  return { id, path: `n${id}`, name: `n${id}`, x, y, vx: 0, vy: 0, cluster, links: 0, phase: 0.5, r: 5, hub: false, ghost: false };
+  return { id, path: `n${id}`, name: `n${id}`, x, y, vx: 0, vy: 0, cluster, links: 0, phase: 0.5, r: 5, hub: false };
 }
 
 function run(nodes: GraphNode[], steps: number, cfg: GraphConfig, seed = 1): void {

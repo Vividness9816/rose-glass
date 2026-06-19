@@ -344,18 +344,6 @@ export class GraphRenderer implements GraphRendererLike {
     // nodes
     nodes.forEach((n) => {
       ctx.globalAlpha = this.nodeAlpha(n.id);
-      // ghost (unresolved-link placeholder): a small faded outline dot, no ornament.
-      if (n.ghost) {
-        ctx.globalAlpha = this.nodeAlpha(n.id) * 0.5;
-        ctx.beginPath();
-        ctx.arc(n.x, n.y, 3, 0, Math.PI * 2);
-        ctx.fillStyle = rgba(theme.label, 0.25);
-        ctx.fill();
-        ctx.strokeStyle = rgba(theme.label, 0.35);
-        ctx.lineWidth = 0.6;
-        ctx.stroke();
-        return;
-      }
       const cluster = clusterRgb(n.cluster);
       const clusterAccent = theme.clusters[n.cluster]?.accent ?? theme.clusters[0].accent;
       // Phase-6 bullseye inversion (theme-driven): dark = cluster-colour shell + ink core;
