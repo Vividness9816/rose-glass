@@ -12,6 +12,23 @@ import { probeWebGpu } from './webgpu/probe';
 import { Icon } from '../icons/Icon';
 import './graph.css';
 
+// Persisted GPU/2D renderer preference.
+const GPU_KEY = 'rose-glass:graph-gpu';
+function loadGpuPref(): boolean {
+  try {
+    return localStorage.getItem(GPU_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+function saveGpuPref(on: boolean): void {
+  try {
+    localStorage.setItem(GPU_KEY, on ? '1' : '0');
+  } catch {
+    /* private mode / quota — preference just won't persist this session */
+  }
+}
+
 /** Graph pane: mockup chrome + the live canvas-2D graph. Uses `data` (from the
  *  indexer) when given, else mock data. Rebuilds the renderer when `data` changes. */
 function GraphPaneInner({
@@ -24,13 +41,10 @@ function GraphPaneInner({
   onRetryCluster,
   pulseRef,
   onOpenNode,
-  activePath,
 }: {
   theme: Theme;
   data?: GraphData;
   onOpenVault?: () => void;
-  /** The open note's path — the centre of "Focus" (local-graph) scope. */
-  activePath?: string | null;
   onCluster?: () => void;
   clustering?: boolean;
   /** v2.0: a failed embedding-model load (the ~90MB fetch) → show a Retry. */
@@ -46,12 +60,10 @@ function GraphPaneInner({
   const rendererRef = useRef<GraphRendererLike | null>(null);
   const onOpenNodeRef = useRef(onOpenNode);
   onOpenNodeRef.current = onOpenNode;
-  const [scope, setScope] = useState<'all' | 'focus'>('all'); // graph scope: whole graph vs local
-  const scopeRef = useRef(scope);
-  scopeRef.current = scope;
-  const activePathRef = useRef(activePath);
-  activePathRef.current = activePath;
   const [gpuOn, setGpuOn] = useState(false); // user intent: try the WebGPU path
+  // Saved GPU pref, read once. We start 2D and restore this only AFTER the probe confirms
+  // WebGPU is available (below), so a stored 'GPU' never strands us on a 2D-committed canvas.
+  const wantGpuRef = useRef(loadGpuPref());
   const [gpuAvailable, setGpuAvailable] = useState<boolean | null>(null); // null = probing
   const [gpuReason, setGpuReason] = useState('probing…');
   // Read availability inside build() via a ref so the probe RESOLVING doesn't re-run
@@ -72,6 +84,9 @@ function GraphPaneInner({
       if (cancelled) return;
       setGpuAvailable(c.ok);
       setGpuReason(c.reason);
+      // restore the saved GPU preference now that availability is known (build effect re-runs
+      // on the gpuOn change and reads gpuAvailableRef = true → builds the GPU renderer).
+      if (c.ok && wantGpuRef.current) setGpuOn(true);
     });
     return () => {
       cancelled = true;
@@ -125,7 +140,7 @@ function GraphPaneInner({
       rendererRef.current = r;
       const s = sizeCanvas(); // honor any resize that landed during the async build
       r.setSize(s.w, s.h, s.dpr);
-      r.setFocus(scopeRef.current === 'focus' ? (activePathRef.current ?? null) : null); // re-apply focus after a rebuild
+      r.setFocus(null); // hover drives focus now; start un-dimmed
       r.setConfig(configRef.current); // re-apply the user's physics to the fresh renderer
       r.start();
     };
@@ -174,11 +189,6 @@ function GraphPaneInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key on the color values, not the array identity
   }, [config.clusterColors.join('|')]);
 
-  // Local-graph focus: dim everything but the open note + its neighbours (or clear it).
-  useEffect(() => {
-    rendererRef.current?.setFocus(scope === 'focus' ? (activePath ?? null) : null);
-  }, [scope, activePath]);
-
   // Phase 4 — pan / zoom / drag / click-open. Native listeners (wheel needs
   // passive:false to preventDefault); all forward to the live renderer's camera.
   useEffect(() => {
@@ -217,7 +227,9 @@ function GraphPaneInner({
       if (!r) return;
       const [sx, sy] = at(e);
       if (drag.mode === 'none') {
-        canvas.style.cursor = r.pickAtScreen(sx, sy) ? 'pointer' : 'default';
+        canvas.style.cursor = r.pickAtScreen(sx, sy) ? 'pointer' : 'default'; // strict: pointer only when clickable
+        const near = r.pickAtScreen(sx, sy, 22); // forgiving hover radius → highlight + label the nearest node
+        r.setFocus(near ? near.path : null);
         return;
       }
       if (Math.abs(sx - drag.dx0) + Math.abs(sy - drag.dy0) > 3) drag.moved = true;
@@ -243,17 +255,20 @@ function GraphPaneInner({
         /* pointer already released */
       }
     };
+    const onLeave = () => rendererRef.current?.setFocus(null); // leaving the canvas clears the hover highlight
     canvas.addEventListener('wheel', onWheel, { passive: false });
     canvas.addEventListener('pointerdown', onDown);
     canvas.addEventListener('pointermove', onMove);
     canvas.addEventListener('pointerup', onUp);
     canvas.addEventListener('pointercancel', onUp);
+    canvas.addEventListener('pointerleave', onLeave);
     return () => {
       canvas.removeEventListener('wheel', onWheel);
       canvas.removeEventListener('pointerdown', onDown);
       canvas.removeEventListener('pointermove', onMove);
       canvas.removeEventListener('pointerup', onUp);
       canvas.removeEventListener('pointercancel', onUp);
+      canvas.removeEventListener('pointerleave', onLeave);
     };
     // gpuOn re-runs this so listeners re-attach to the fresh canvas after the
     // backend toggle remounts it (via the JSX key).
@@ -272,25 +287,6 @@ function GraphPaneInner({
               Open vault…
             </button>
           )}
-          <button
-            className={`gc-btn${scope === 'all' ? ' active' : ''}`}
-            type="button"
-            onClick={() => setScope('all')}
-            aria-pressed={scope === 'all'}
-            title="Show the whole graph"
-          >
-            All
-          </button>
-          <button
-            className={`gc-btn${scope === 'focus' ? ' active' : ''}`}
-            type="button"
-            onClick={() => setScope('focus')}
-            disabled={!activePath}
-            aria-pressed={scope === 'focus'}
-            title={activePath ? 'Focus the open note + its links' : 'Open a note to focus its local graph'}
-          >
-            Focus
-          </button>
           <button
             className="gc-btn"
             type="button"
@@ -314,7 +310,13 @@ function GraphPaneInner({
           <button
             className={`gc-btn${gpuOn ? ' active' : ''}`}
             type="button"
-            onClick={() => setGpuOn((v) => !v)}
+            onClick={() =>
+              setGpuOn((v) => {
+                const next = !v;
+                saveGpuPref(next); // persist only on explicit user toggle (not device-loss fallback)
+                return next;
+              })
+            }
             disabled={!gpuAvailable}
             aria-pressed={gpuOn}
             title={

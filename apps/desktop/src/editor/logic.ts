@@ -51,19 +51,21 @@ export function applyEol(lf: string, eol: Eol): string {
 
 export interface DebouncedSaver {
   schedule(path: string, content: string): void;
-  flush(): void;
+  /** Fire the pending write now and resolve once it settles (R3 — await before a re-read
+      so the same path isn't read mid-write; also used by the shutdown flush). */
+  flush(): Promise<void>;
 }
 
 /** Debounced autosave that coalesces rapid edits to one write, and can be
  *  flushed immediately (e.g. before switching notes — so edits aren't dropped). */
 export function makeDebouncedSaver(
-  save: (path: string, content: string) => void,
+  save: (path: string, content: string) => void | Promise<void>,
   delayMs: number,
 ): DebouncedSaver {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let pending: { path: string; content: string } | null = null;
 
-  const fire = () => {
+  const fire = (): Promise<void> => {
     if (timer) {
       clearTimeout(timer);
       timer = null;
@@ -71,15 +73,16 @@ export function makeDebouncedSaver(
     if (pending) {
       const p = pending;
       pending = null;
-      save(p.path, p.content);
+      return Promise.resolve(save(p.path, p.content));
     }
+    return Promise.resolve();
   };
 
   return {
     schedule(path, content) {
       pending = { path, content };
       if (timer) clearTimeout(timer);
-      timer = setTimeout(fire, delayMs);
+      timer = setTimeout(() => void fire(), delayMs);
     },
     flush: fire,
   };

@@ -24,6 +24,8 @@ import { parseOutline } from '../editor/outline';
 // project's three.js/ShaderBackdrop pattern) — loaded only when a binary is opened.
 const PdfView = lazy(() => import('../editor/PdfView').then((m) => ({ default: m.PdfView })));
 const DocxView = lazy(() => import('../editor/DocxView').then((m) => ({ default: m.DocxView })));
+// markdown-it (+ DOMPurify) ride the reading view — lazy so they stay off the boot chunk.
+const ReadingView = lazy(() => import('../editor/ReadingView').then((m) => ({ default: m.ReadingView })));
 
 interface Props {
   note: NoteDto | null;
@@ -31,6 +33,9 @@ interface Props {
   backlinks: BacklinkDto[];
   /** When set, a non-markdown binary (pdf/docx) is open instead of a note. */
   binaryPath: string | null;
+  /** v2.3: per-tab edit/read mode (owned by the active tab in Shell). */
+  mode: 'edit' | 'read';
+  onToggleMode: () => void;
   onChangeDoc: (doc: string) => void;
   onOpenPath: (path: string) => void;
   onWikiClick: (target: string) => void;
@@ -71,6 +76,8 @@ export function EditorPane({
   doc,
   backlinks,
   binaryPath,
+  mode,
+  onToggleMode,
   onChangeDoc,
   onOpenPath,
   onWikiClick,
@@ -212,6 +219,15 @@ export function EditorPane({
         <Breadcrumb path={segments} current={note?.title ?? 'No note open'} />
         <div className="editor-actions">
           <button
+            className={`ea-btn${mode === 'read' ? ' active' : ''}`}
+            title={mode === 'read' ? 'Switch to editing' : 'Switch to reading'}
+            type="button"
+            disabled={!note}
+            onClick={onToggleMode}
+          >
+            <Icon name={mode === 'read' ? 'edit' : 'book'} size="sm" />
+          </button>
+          <button
             className={`ea-btn${panel === 'outline' ? ' active' : ''}`}
             title="Outline"
             type="button"
@@ -286,14 +302,20 @@ export function EditorPane({
           </div>
         )}
 
-        <CodeMirrorHost
-          className="note-body cm-host"
-          doc={doc}
-          notePath={note?.path ?? null}
-          onChangeDoc={onChangeDoc}
-          onWikiClick={onWikiClick}
-          editorViewRef={editorViewRef}
-        />
+        {mode === 'read' ? (
+          <Suspense fallback={<div className="bv-status">Rendering…</div>}>
+            <ReadingView className="note-body" doc={doc} onWikiClick={onWikiClick} />
+          </Suspense>
+        ) : (
+          <CodeMirrorHost
+            className="note-body cm-host"
+            doc={doc}
+            notePath={note?.path ?? null}
+            onChangeDoc={onChangeDoc}
+            onWikiClick={onWikiClick}
+            editorViewRef={editorViewRef}
+          />
+        )}
 
         {backlinks.length > 0 && (
           <div className="backlinks">

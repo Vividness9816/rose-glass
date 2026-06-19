@@ -25,6 +25,8 @@ import { Backdrop } from '../backdrop/Backdrop';
 const TerminalPane = lazy(() =>
   import('../terminal/TerminalPane').then((m) => ({ default: m.TerminalPane })),
 );
+// v2.3: lazy so markdown-it (via ReadingView) stays off the boot chunk.
+const HelpOverlay = lazy(() => import('./HelpOverlay').then((m) => ({ default: m.HelpOverlay })));
 import { isUnattended } from '../terminal/attention';
 import { Splitter } from './Splitter';
 import { clampFraction, clampPx, nextFraction, TERM_H_DEFAULT, TERM_H_MIN } from './splitLogic';
@@ -45,6 +47,18 @@ import { StatusBar } from './StatusBar';
 import { NotesPane } from './NotesPane';
 import { TagsPane } from './TagsPane';
 import { SettingsPane } from './SettingsPane';
+import { TabBar } from './TabBar';
+import {
+  EMPTY_TABS,
+  activateTab,
+  activeTab,
+  closeTab,
+  openTab,
+  setTabMode,
+  type TabKind,
+  type TabsState,
+} from './tabs';
+import { useSettings } from '../settings/SettingsContext';
 import { loadSession, saveSession } from './session';
 import {
   activityStart,
@@ -86,6 +100,7 @@ export function Shell() {
   const [doc, setDoc] = useState('');
   const [binaryPath, setBinaryPath] = useState<string | null>(null); // Phase 9: open pdf/docx (not an indexed note)
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false); // v2.3 Help overlay
   const [paletteQuery, setPaletteQuery] = useState<string | undefined>(undefined); // pre-fill (tag search)
   const [terminalOpen, setTerminalOpen] = useState(false); // is the terminal drawer VISIBLE
   const [terminals, setTerminals] = useState<number[]>([]); // open tab ids — each is a live PTY kept alive while hidden
@@ -105,6 +120,17 @@ export function Shell() {
   const [railView, setRailView] = useState('graph'); // which IconRail view; 'activity' swaps the right pane
   const [activity, setActivity] = useState<ActivityState>(emptyActivity); // Phase 8 ephemeral ring
   const [tailing, setTailing] = useState(false); // is the CC activity tail actually running
+
+  // v2.3 document tabs (ADR-20260619). The single editable buffer + save machinery below stay
+  // UNCHANGED; tabsState only tracks WHICH paths are open + the active cursor. Read via refs in
+  // the open/activate/close callbacks so those stay referentially stable (IPC subs don't churn).
+  const settings = useSettings();
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const [tabsState, setTabsState] = useState<TabsState>(EMPTY_TABS);
+  const tabsStateRef = useRef(tabsState);
+  tabsStateRef.current = tabsState;
+  const nextTabIdRef = useRef(1);
 
   // ── v2.1 resizable layout: graph↔right split fraction + terminal-drawer height. Both
   // restore from session and are CLAMPED on read (splitLogic) so a corrupt persisted value
@@ -331,7 +357,7 @@ export function Shell() {
   const openNote = useCallback(
     async (path: string) => {
       try {
-        saver.flush(); // persist any pending edit to the previous note first
+        await saver.flush(); // persist any pending edit to the previous note first (R3: await before re-read)
         const raw = await readNoteFile(path); // disk bytes (strict UTF-8), original EOL
         const [n, bl] = await Promise.all([getNote(path), getBacklinks(path)]);
         setBinaryPath(null); // opening a note leaves any pdf/docx view
@@ -367,14 +393,82 @@ export function Shell() {
     [saver],
   );
 
+  // v2.3: open a path in a tab (or focus its existing tab), then load the active tab's buffer
+  // via the UNCHANGED single-buffer openNote/openBinary (ADR-20260619). Stable identity (reads
+  // tabs/settings via refs), so the IPC subscription effects don't re-bind on tab changes.
+  const openInTab = useCallback(
+    (path: string, kind: TabKind) => {
+      const s = settingsRef.current;
+      const isNew = !tabsStateRef.current.tabs.some((t) => t.path === path);
+      const mode = kind === 'note' ? s.defaultView : 'edit';
+      const r = openTab(
+        tabsStateRef.current,
+        { path, kind, mode },
+        nextTabIdRef.current,
+        s.alwaysFocusNewTabs,
+      );
+      if (isNew) nextTabIdRef.current += 1;
+      setTabsState(r.state);
+      if (r.activate != null) {
+        if (kind === 'note') void openNote(path);
+        else openBinary(path);
+      }
+    },
+    [openNote, openBinary],
+  );
+
+  const activateTabById = useCallback(
+    (id: number) => {
+      const t = tabsStateRef.current.tabs.find((x) => x.id === id);
+      if (!t) return;
+      setTabsState(activateTab(tabsStateRef.current, id));
+      if (t.kind === 'note') void openNote(t.path);
+      else openBinary(t.path);
+    },
+    [openNote, openBinary],
+  );
+
+  const closeTabById = useCallback(
+    (id: number) => {
+      const r = closeTab(tabsStateRef.current, id);
+      setTabsState(r.state);
+      if (!r.wasActive) return; // closing a background tab never touches the active buffer
+      if (r.activate != null) {
+        const t = r.state.tabs.find((x) => x.id === r.activate);
+        if (t) {
+          // openNote/openBinary flush the closing tab's pending write first (R2)
+          if (t.kind === 'note') void openNote(t.path);
+          else openBinary(t.path);
+        }
+      } else {
+        // no tabs left → flush the closing tab's pending write (R2), then clear to the empty state
+        void saver.flush().then(() => {
+          openNotePathRef.current = null;
+          isDirtyRef.current = false;
+          lastSavedRef.current = null;
+          setNote(null);
+          setBacklinks([]);
+          setDoc('');
+          setBinaryPath(null);
+        });
+      }
+    },
+    [openNote, openBinary, saver],
+  );
+
+  const onToggleMode = useCallback(() => {
+    const a = activeTab(tabsStateRef.current);
+    if (a) setTabsState((s) => setTabMode(s, a.id, a.mode === 'read' ? 'edit' : 'read'));
+  }, []);
+
   // v2.2: stable callback for a graph node click, so React.memo(GraphPane) isn't defeated by
   // a fresh inline arrow each render (the only GraphPane prop that wasn't already stable).
   const onOpenGraphNode = useCallback(
     (p: string) => {
       setRailView('graph'); // surface the editor for the clicked note
-      void openNote(p);
+      openInTab(p, 'note');
     },
-    [openNote],
+    [openInTab],
   );
 
   // Phase 9: "Open file…" — pick any file via the dialog and route by extension. The file
@@ -397,12 +491,11 @@ export function Shell() {
         return;
       }
       const kind = editorKind(rel);
-      if (kind === 'pdf' || kind === 'docx') openBinary(rel);
-      else await openNote(rel);
+      openInTab(rel, kind === 'pdf' || kind === 'docx' ? 'binary' : 'note');
     } catch (e) {
       console.error('open file failed:', e);
     }
-  }, [openBinary, openNote]);
+  }, [openInTab]);
 
   // Phase 9 / docx B1: extract the .docx to a sibling markdown file and open it. The .docx
   // is never mutated; the sibling .md flows through the normal save + indexer path.
@@ -422,12 +515,12 @@ export function Shell() {
           exists = false; // not found (or unreadable) → safe to create
         }
         if (!exists) await saveNoteFile(sibling, markdown);
-        await openNote(sibling); // watcher indexes a new .md → it appears as a graph node
+        openInTab(sibling, 'note'); // watcher indexes a new .md → it appears as a graph node
       } catch (e) {
         console.error('edit-as-markdown failed:', e);
       }
     },
-    [openNote],
+    [openInTab],
   );
 
   const onChangeDoc = useCallback(
@@ -444,12 +537,12 @@ export function Shell() {
     async (target: string) => {
       try {
         const dst = await resolveLink(target, openNotePathRef.current ?? '');
-        if (dst) await openNote(dst);
+        if (dst) openInTab(dst, 'note');
       } catch (e) {
         console.error('wikilink nav failed:', e);
       }
     },
-    [openNote],
+    [openInTab],
   );
 
   // Open a vault by absolute path (no dialog). Opens `restoreNote` if it still exists,
@@ -471,12 +564,12 @@ export function Shell() {
             : payload
               ? firstNotePath(payload.nodes)
               : undefined;
-        if (target) await openNote(target);
+        if (target) openInTab(target, 'note');
       } catch (e) {
         console.error('open vault failed:', e);
       }
     },
-    [refreshGraph, openNote],
+    [refreshGraph, openInTab],
   );
 
   const openVaultFlow = useCallback(async () => {
@@ -502,13 +595,12 @@ export function Shell() {
           if (cut > 0) await openVaultByPath(absPath.slice(0, cut));
         }
         const r = await ingestDroppedFile(absPath);
-        if (r.kind === 'note') await openNote(r.rel);
-        else openBinary(r.rel);
+        openInTab(r.rel, r.kind === 'note' ? 'note' : 'binary');
       } catch (e) {
         console.error('open external file failed for', absPath, e);
       }
     },
-    [openVaultByPath, openNote, openBinary],
+    [openVaultByPath, openInTab],
   );
 
   // Titlebar "+ New note": create a non-colliding Untitled note at the vault root and open it.
@@ -520,11 +612,11 @@ export function Shell() {
     try {
       await saveNoteFile(name, '# Untitled\n\n');
       setRailView('graph');
-      await openNote(name);
+      openInTab(name, 'note');
     } catch (e) {
       console.error('new note failed:', e);
     }
-  }, [graphData, openNote]);
+  }, [graphData, openInTab]);
 
   // Titlebar "↗ Share": reveal the vault folder in the OS file explorer (export affordance,
   // distinct from the editor-header note-level Copy-as-Markdown).
@@ -545,6 +637,18 @@ export function Shell() {
     let unRebuilt: (() => void) | undefined;
     onIndexNote(async (e) => {
       void refreshGraph();
+      // v2.3: a deleted note drops its tab (active or background). For the ACTIVE note the buffer
+      // is also cleared below; activeId → null keeps the empty buffer consistent with no active tab.
+      if (e.op === 'delete') {
+        setTabsState((s) => {
+          const tab = s.tabs.find((t) => t.path === e.path);
+          if (!tab) return s;
+          return {
+            tabs: s.tabs.filter((t) => t.id !== tab.id),
+            activeId: s.activeId === tab.id ? null : s.activeId,
+          };
+        });
+      }
       if (e.path !== openNotePathRef.current) return;
       // open note was deleted on disk → clear to the empty state
       if (e.op === 'delete') {
@@ -608,8 +712,7 @@ export function Shell() {
             const r = await ingestDroppedFile(p);
             // Open only the first successfully-ingested file; the rest still get indexed.
             if (!opened) {
-              if (r.kind === 'note') await openNote(r.rel);
-              else openBinary(r.rel);
+              openInTab(r.rel, r.kind === 'note' ? 'note' : 'binary');
               opened = true;
             }
           } catch (e) {
@@ -624,7 +727,7 @@ export function Shell() {
       active = false;
       un?.();
     };
-  }, [openNote, openBinary]);
+  }, [openInTab]);
 
   // v2.2: a file opened from the OS while we're ALREADY running — the single-instance plugin
   // forwarded it (focus + open-file event). Reuse the same ingest/open path as drag-drop.
@@ -724,7 +827,6 @@ export function Shell() {
         <GraphPane
           theme={theme}
           data={graphData}
-          activePath={note?.path ?? null}
           onOpenVault={openVaultFlow}
           onCluster={onCluster}
           clustering={clustering}
@@ -741,7 +843,7 @@ export function Shell() {
             activePath={note?.path ?? null}
             onOpen={(p) => {
               setRailView('graph');
-              void openNote(p);
+              openInTab(p, 'note');
             }}
           />
         ) : railView === 'tags' ? (
@@ -753,18 +855,29 @@ export function Shell() {
             vault={vault}
             onReindex={() => void onReindex()}
             reindexing={reindexing}
+            onHelp={() => setHelpOpen(true)}
           />
         ) : (
-          <EditorPane
-            note={note}
-            doc={doc}
-            backlinks={backlinks}
-            binaryPath={binaryPath}
-            onChangeDoc={onChangeDoc}
-            onOpenPath={openNote}
-            onWikiClick={onWikiClick}
-            onEditAsMarkdown={onEditAsMarkdown}
-          />
+          <div className="editor-with-tabs">
+            <TabBar
+              tabs={tabsState.tabs}
+              activeId={tabsState.activeId}
+              onActivate={activateTabById}
+              onClose={closeTabById}
+            />
+            <EditorPane
+              note={note}
+              doc={doc}
+              backlinks={backlinks}
+              binaryPath={binaryPath}
+              mode={activeTab(tabsState)?.mode ?? 'edit'}
+              onToggleMode={onToggleMode}
+              onChangeDoc={onChangeDoc}
+              onOpenPath={(p) => openInTab(p, 'note')}
+              onWikiClick={onWikiClick}
+              onEditAsMarkdown={onEditAsMarkdown}
+            />
+          </div>
         )}
         <Splitter
           axis="x"
@@ -791,10 +904,15 @@ export function Shell() {
           // where opening a note behind the current pane reads as "click does nothing".
           onOpenNote={(p) => {
             setRailView('graph');
-            void openNote(p);
+            openInTab(p, 'note');
           }}
           initialQuery={paletteQuery}
         />
+      )}
+      {helpOpen && (
+        <Suspense fallback={null}>
+          <HelpOverlay onClose={() => setHelpOpen(false)} />
+        </Suspense>
       )}
       {/* Once opened, the drawer stays MOUNTED so its PTYs keep running; Ctrl+` just
           hides it (display:none). Each tab is a keyed TerminalPane — only the active one

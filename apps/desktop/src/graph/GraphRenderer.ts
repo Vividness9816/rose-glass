@@ -78,6 +78,8 @@ export class GraphRenderer implements GraphRendererLike {
   // Local-graph focus (the "Focus" scope): when set, only these node ids render at
   // full strength; everything else is dimmed. null = the whole graph ("All").
   private focusSet: Set<number> | null = null;
+  // The single hovered node whose label is drawn (focusSet drives dimming; this is the label).
+  private hoverId: number | null = null;
   private config: GraphConfig = DEFAULT_CONFIG; // v2.0 user-tunable physics
 
   constructor(canvas: HTMLCanvasElement, data: GraphData, theme: GraphTheme, dpr = 1) {
@@ -119,13 +121,16 @@ export class GraphRenderer implements GraphRendererLike {
   setFocus(path: string | null) {
     if (!path) {
       this.focusSet = null;
+      this.hoverId = null;
       return;
     }
     const n = lookupNodeByRel(this.pathIndex, path);
     if (!n) {
       this.focusSet = null;
+      this.hoverId = null;
       return;
     }
+    this.hoverId = n.id;
     const set = new Set<number>([n.id]);
     for (const e of this.data.edges) {
       if (e.a === n.id) set.add(e.b);
@@ -156,9 +161,10 @@ export class GraphRenderer implements GraphRendererLike {
     this.camera = IDENTITY_CAMERA;
   }
   /** Node under a screen point, or undefined (for click-open / drag pickup). */
-  pickAtScreen(sx: number, sy: number): GraphNode | undefined {
+  pickAtScreen(sx: number, sy: number, slack = 5): GraphNode | undefined {
     const [wx, wy] = screenToWorld(this.camera, sx, sy);
-    return nodeAtWorld(this.data.nodes, wx, wy);
+    // slack is SCREEN px → convert to world units (hit-test runs in world space).
+    return nodeAtWorld(this.data.nodes, wx, wy, slack / this.camera.zoom);
   }
   /** Move the given node to a screen point (drag); pins it for this frame. */
   moveNodeToScreen(id: number, sx: number, sy: number) {
@@ -389,11 +395,6 @@ export class GraphRenderer implements GraphRendererLike {
           ctx.fillStyle = rgba(rgbC, 0.6);
           ctx.fill();
         }
-        ctx.font = 'bold 10px Inter, sans-serif';
-        ctx.fillStyle = rgba(theme.label, 0.85);
-        ctx.textAlign = 'center';
-        ctx.fillText(n.name, n.x, n.y + n.r + 14);
-        ctx.textAlign = 'left';
       } else if (n.links >= 2) {
         ctx.beginPath();
         ctx.arc(n.x, n.y, n.r + 2 + pulse * 2.5, 0, Math.PI * 2);
@@ -428,6 +429,19 @@ export class GraphRenderer implements GraphRendererLike {
         ctx.stroke();
       }
     });
+
+    // label: only the hovered node — Obsidian-style hover label (no hover = none).
+    if (this.hoverId !== null) {
+      const n = this.byId.get(this.hoverId);
+      if (n) {
+        ctx.globalAlpha = 1;
+        ctx.font = 'bold 11px Inter, sans-serif';
+        ctx.fillStyle = rgba(theme.label, 0.95);
+        ctx.textAlign = 'center';
+        ctx.fillText(n.name, n.x, n.y + n.r + 14);
+        ctx.textAlign = 'left';
+      }
+    }
 
     // activity flares + the next frame's base layer always render at full strength,
     // regardless of focus dimming applied to the node/edge layers above.

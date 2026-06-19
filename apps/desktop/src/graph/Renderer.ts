@@ -19,7 +19,9 @@ export interface GraphRendererLike {
   getCamera(): Camera;
   zoomAtScreen(sx: number, sy: number, factor: number): void;
   panByScreen(dx: number, dy: number): void;
-  pickAtScreen(sx: number, sy: number): GraphNode | undefined;
+  /** Nearest node to a screen point within `slack` SCREEN px (default 5 ≈ a precise click;
+      a larger value gives a forgiving hover). */
+  pickAtScreen(sx: number, sy: number, slack?: number): GraphNode | undefined;
   moveNodeToScreen(id: number, sx: number, sy: number): void;
   setDragging(id: number | null): void;
   // Phase 8 activity light-up

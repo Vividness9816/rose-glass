@@ -509,9 +509,9 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
   panByScreen(dx: number, dy: number) {
     this.camera = panBy(this.camera, dx, dy);
   }
-  pickAtScreen(sx: number, sy: number): GraphNode | undefined {
+  pickAtScreen(sx: number, sy: number, slack = 5): GraphNode | undefined {
     const [wx, wy] = screenToWorld(this.camera, sx, sy);
-    return nodeAtWorld(this.data.nodes, wx, wy);
+    return nodeAtWorld(this.data.nodes, wx, wy, slack / this.camera.zoom);
   }
   moveNodeToScreen(id: number, sx: number, sy: number) {
     const n = this.byId.get(id);

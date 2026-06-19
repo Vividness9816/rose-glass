@@ -11,11 +11,14 @@ import './tokens/tokens.css';
 import './styles/global.css';
 import { initTheme } from './appearance/theme';
 import { Shell } from './shell/Shell';
+import { SettingsProvider } from './settings/SettingsContext';
 
 initTheme(); // apply persisted theme before first paint
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
-    <Shell />
+    <SettingsProvider>
+      <Shell />
+    </SettingsProvider>
   </React.StrictMode>,
 );

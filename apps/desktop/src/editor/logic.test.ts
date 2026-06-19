@@ -90,4 +90,15 @@ describe('makeDebouncedSaver', () => {
     vi.advanceTimersByTime(600);
     expect(save).toHaveBeenCalledTimes(1);
   });
+
+  it('flush() resolves only after the pending async write settles (R3)', async () => {
+    let done = false;
+    const saver = makeDebouncedSaver(async () => {
+      await Promise.resolve();
+      done = true;
+    }, 600);
+    saver.schedule('n.md', 'x');
+    await saver.flush();
+    expect(done).toBe(true);
+  });
 });
