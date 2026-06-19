@@ -360,6 +360,16 @@ export function Shell() {
     [saver],
   );
 
+  // v2.2: stable callback for a graph node click, so React.memo(GraphPane) isn't defeated by
+  // a fresh inline arrow each render (the only GraphPane prop that wasn't already stable).
+  const onOpenGraphNode = useCallback(
+    (p: string) => {
+      setRailView('graph'); // surface the editor for the clicked note
+      void openNote(p);
+    },
+    [openNote],
+  );
+
   // Phase 9: "Open file…" — pick any file via the dialog and route by extension. The file
   // must live inside the open vault (the IPC + safe_join contract is vault-relative); a
   // markdown/txt pick opens as a note, a pdf/docx as a binary view.
@@ -671,10 +681,7 @@ export function Shell() {
           clusterError={clusterError}
           onRetryCluster={onRetryCluster}
           pulseRef={graphPulseRef}
-          onOpenNode={(p) => {
-            setRailView('graph'); // surface the editor for the clicked note
-            void openNote(p);
-          }}
+          onOpenNode={onOpenGraphNode}
         />
         {railView === 'activity' ? (
           <ActivityPane state={activity} tailing={tailing} vaultOpen={graphData !== undefined} />

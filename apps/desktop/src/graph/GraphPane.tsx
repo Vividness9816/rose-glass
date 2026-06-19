@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { memo, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import type { Theme } from '../appearance/theme';
 import type { GraphData } from './types';
 import { buildMockGraph } from './mockGraph';
@@ -13,7 +13,7 @@ import './graph.css';
 
 /** Graph pane: mockup chrome + the live canvas-2D graph. Uses `data` (from the
  *  indexer) when given, else mock data. Rebuilds the renderer when `data` changes. */
-export function GraphPane({
+function GraphPaneInner({
   theme,
   data,
   onOpenVault,
@@ -332,3 +332,9 @@ export function GraphPane({
     </div>
   );
 }
+
+/* v2.2 — memoized so a Shell re-render (e.g. the per-CC-event setActivity tick) doesn't
+   re-enter GraphPane's render body. Effective ONLY because every prop Shell passes is
+   referentially stable: data identity is stable between graph refreshes, the callbacks are
+   useCallback (incl. onOpenNode as of v2.2), pulseRef is a ref, the rest are primitives. */
+export const GraphPane = memo(GraphPaneInner);
