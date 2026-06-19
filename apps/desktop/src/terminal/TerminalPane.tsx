@@ -4,7 +4,7 @@
    vault server-side (backend reads AppState.vault_root), so we pass cwd=null.
    Colors/font are read from the token layer (no hardcoded values — A10/§16). */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
@@ -20,6 +20,7 @@ import {
   ptySpawn,
   ptyWrite,
 } from '../ipc';
+import { decideContextMenu, decideKey, stripTrailingNewline } from './clipboard';
 import './terminal.css';
 
 function token(name: string): string {
@@ -40,6 +41,7 @@ function xtermTheme() {
 export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention?: () => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  const [copied, setCopied] = useState(false); // brief "copied" flash (copy is otherwise invisible)
   // Latest callback without re-running the (mount-once) PTY effect.
   const onAttentionRef = useRef(onAttention);
   onAttentionRef.current = onAttention;
@@ -114,6 +116,64 @@ export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention
       }
     })();
 
+    // ── Clipboard shortcuts (PowerShell-style). Right-click = copy-if-selection-else-paste;
+    // Ctrl+C copies ONLY with a live selection (else it passes through as \x03 SIGINT);
+    // Ctrl+V / Ctrl+Shift+C / Ctrl+Shift+V. The copy/SIGINT branching is unit-tested in
+    // clipboard.ts; here we only do the IO. Paste routes through term.paste so PowerShell's
+    // bracketed paste wraps it (no auto-run) and a trailing newline is stripped as a floor.
+    const flashCopied = () => {
+      if (disposed) return;
+      setCopied(true);
+      window.setTimeout(() => {
+        if (!disposed) setCopied(false);
+      }, 900);
+    };
+    const doCopy = () => {
+      const sel = term.getSelection();
+      if (!sel) return;
+      void (async () => {
+        try {
+          const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
+          await writeText(sel);
+          term.clearSelection(); // so a following bare Ctrl+C is the interrupt again
+          flashCopied();
+        } catch (e) {
+          console.debug('terminal copy failed:', e);
+        }
+      })();
+    };
+    const doPaste = () => {
+      void (async () => {
+        try {
+          const { readText } = await import('@tauri-apps/plugin-clipboard-manager');
+          const text = await readText();
+          if (text) term.paste(stripTrailingNewline(text));
+        } catch (e) {
+          console.debug('terminal paste failed:', e);
+        }
+      })();
+    };
+    term.attachCustomKeyEventHandler((e) => {
+      const action = decideKey(e, term.hasSelection());
+      if (action === 'copy') {
+        e.preventDefault();
+        doCopy();
+        return false;
+      }
+      if (action === 'paste') {
+        e.preventDefault();
+        doPaste();
+        return false;
+      }
+      return true; // passthrough: xterm sends the bytes (bare Ctrl+C → \x03 SIGINT)
+    });
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      if (decideContextMenu(term.hasSelection()) === 'copy') doCopy();
+      else doPaste();
+    };
+    host.addEventListener('contextmenu', onContextMenu);
+
     const ro = new ResizeObserver(() => {
       try {
         fit.fit();
@@ -128,6 +188,7 @@ export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention
     return () => {
       disposed = true;
       ro.disconnect();
+      host.removeEventListener('contextmenu', onContextMenu);
       unOut?.();
       unExit?.();
       if (id >= 0) void ptyKill(id);
@@ -144,5 +205,12 @@ export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention
   if (!inTauri()) {
     return <div className="terminal-host terminal-placeholder">Terminal runs in the desktop app.</div>;
   }
-  return <div className="terminal-host" ref={hostRef} />;
+  return (
+    <div className="terminal-host-wrap">
+      <div className="terminal-host" ref={hostRef} />
+      <span className={`terminal-copied${copied ? ' show' : ''}`} aria-hidden="true">
+        copied
+      </span>
+    </div>
+  );
 }

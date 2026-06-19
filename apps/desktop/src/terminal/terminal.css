@@ -156,6 +156,15 @@
   flex-direction: column; /* active pane is inline display:flex → the host's flex:1 fills it */
 }
 
+/* Wraps the xterm host so the transient "copied" pill can be an absolutely-positioned
+   sibling (xterm owns the host's own children, so the pill can't live inside it). */
+.terminal-host-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 .terminal-host {
   flex: 1;
   min-height: 0;
@@ -169,6 +178,34 @@
   color: var(--text-3);
   font-size: 12px;
   font-family: var(--font-mono);
+}
+
+/* Transient copy confirmation — copy leaves no visible trace, so a quick pill confirms it.
+   Bottom-right of the terminal body, fades out fast; reduced-motion shows/hides instantly. */
+.terminal-copied {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border-mid);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-norm) var(--ease-out);
+  z-index: 6;
+}
+.terminal-copied.show {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .terminal-copied {
+    transition: none;
+  }
 }
 
 /* xterm paints its own background; let the glass drawer show by keeping the viewport clear */
