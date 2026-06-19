@@ -21,6 +21,32 @@ States: ✅ proven · 🟡 partial · 🟥 stubbed · ⬜ untouched
 | A10 | Reskin (edit `tokens.css`) re-themes app **and** graph, no component edits | ✅ | The `[data-theme=light]` block re-themes the whole app + the canvas graph (via `resolveGraphTheme()`) with zero component edits: `phase1-shell-{dark,light}.png`. **Reinforced in Phase 6**: the full light-theme tune lives entirely in that token block; the graph-over-backdrop translucency rides the token path (`bgRgb`); even the liquid-glass lens tint reads `--rose` from tokens (no component hardcode — review fix). Formal third-theme experiment still open. |
 | A11 | Taste pass confirms hand-built, not templated | ✅ | Phase 6 built the living backdrop + glass + tuned light theme mockup-faithfully (token-driven, no AI-purple/templated defaults; anti-pattern #10 honored — the spec's own locked backdrop, not Impeccable defaults): `phase6-*` proof shots (`phase6-glass`). **Formal `/impeccable` pass DONE (2026-06-18)**: anti-slop verdict **PASS** — distinctive, intentional, hand-built (none of the absolute bans; glass is purposeful chrome over the living backdrop, not decorative cards). Soft spot noted (light-graph cluster auras muddy on the rose field — a taste dial, left to the user). ✅ **User visual-acceptance confirmed live (2026-06-18):** backdrop + glass + both graph themes accepted as hand-built, not templated (a11y `--text-3` fix applied). The binding Phase-6 carve-out is satisfied. |
 
+## Post-v1.0 v2.x shipped (UI polish + branding) — PR #1 (v2.0), PR #2 (v2.1+v2.2)
+**v2.0** (PR #1, merge `f62d741`): drag-drop ingest · customizable graph panel · home-dir
+`ignore`-crate indexing · embed durability (model cache + retry + telemetry + version purge) ·
+real CSP + canonical vault root + threat model · PTY ring buffer + watcher coalesce · signed
+NSIS/MSI installer (CN=Dylan N). ADR-20260618-rose-glass-v2-architecture.
+
+**v2.1 + v2.2** (PR #2, merge `2470fb1`, 12 commits). Gates green: `tsc` 0 · `vitest` 95/95 ·
+`cargo` 75/75 · `clippy` clean for our diffs (the `embed.rs large_enum_variant` warning is
+pre-existing) · `vite build` 0.
+- **v2.1** (ADR-20260619-rose-glass-v2.1-ui-fixes): terminal clipboard shortcuts (right-click
+  copy-if-selection-else-paste; Ctrl+C copies only with a live selection else stays SIGINT;
+  Ctrl+V / Ctrl+Shift+C·V; "copied" pill; default shell cmd.exe→PowerShell + bracketed-paste
+  safety + trailing-newline strip) · attention dot rose-circle→emerald-square + pulse on settled
+  unattended terminal output (~400ms), clears on refocus · resizable graph/editor split +
+  terminal-drawer height (hand-rolled `<Splitter>`, sizes persisted+clamped, rAF-coalesced PTY
+  resize). The Session split/height fields left unstaged in `0f183af` are folded in (`362b05a`).
+- **v2.2** (spec `docs/superpowers/specs/2026-06-19-rose-glass-v2.2-design.md`): graph
+  "solar-system" centripetal `centerPull` (default 0.0015, new "center hold" slider) · lazy
+  `TerminalPane` (boot chunk 1104→771 kB, xterm out) · `React.memo(GraphPane)` (insurance) ·
+  container queries (`.note-meta` wraps + breadcrumb collapses by pane width) · one curated
+  in-repo `<Icon>` set (`src/icons/Icon.tsx`, ~21 paths, 16 render sites swapped, IconRail
+  aria-labels) · single-instance file-open forwarding (`tauri-plugin-single-instance`, open-file
+  event, +docx association, reuses v2.0 drag-drop ingest).
+- **Branding**: app icon → rose-bouquet via `tauri icon` (full PNG/ICO/ICNS + Windows Store set,
+  `392548b`).
+
 ## Phase 12 — §20 acceptance gate PASSED → v1.0 (2026-06-18)
 **All 11 §20 rows ✅ proven.** A3/A4/A7/A9/A10 were headless/test-proven earlier; the 6
 live-window rows (A1/A2/A5/A6/A8/A11) are now confirmed by the **user's live walkthrough**

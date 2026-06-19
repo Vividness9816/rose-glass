@@ -27,7 +27,17 @@ with a riskiest-premise spike on a tiny scope before its build.
 - **Phase 4 (WebGPU)** and **Phase 9 (PDF/docx engines)** open with a premise spike — never assume the hard pillar works; prove it on a tiny scope first. (Phase 9's spike proved pdf-lib *can* edit a PDF but mammoth is read-only → ADR-20260617 chose lossless view-only + edit-as-sibling-md over a lossy writer.)
 - Every `proven` row in STATUS.md cites a commit scope + a re-runnable artifact. No prose "verified."
 
-## Active frontier (post round-2 feedback, 2026-06-17 PM)
+## Post-v1.0 (v2.x) — shipped
+- **v2.0** (PR #1, merge `f62d741`; ADR-20260618-rose-glass-v2-architecture): drag-drop ingest,
+  customizable graph panel, home-dir `ignore`-crate indexing, embed durability, real CSP +
+  canonical vault root + threat model, PTY ring buffer + watcher coalesce, signed NSIS/MSI installer.
+- **v2.1 + v2.2** (PR #2, merge `2470fb1`, 12 commits) — see STATUS.md "Post-v1.0 v2.x shipped".
+  v2.1 (ADR-20260619): terminal clipboard shortcuts + PowerShell default, attention square,
+  resizable panels. v2.2: graph solar-system center-hold, lazy TerminalPane, `React.memo(GraphPane)`,
+  container queries, curated in-repo `<Icon>` set, single-instance file-open forwarding. Branding:
+  rose-bouquet app icon. Gates green (tsc 0 · vitest 95/95 · cargo 75/75 · clippy clean · vite build 0).
+
+## Active frontier (historical — pre-v1.0 round-2 feedback, 2026-06-17 PM)
 ~~Primary: GPU shader parity~~ ✅ **DONE** (Phase 4 row above — GPU-visual parity + Focus + inversion,
 3-lens reviewed, 5090-verified dark+light). Next: the round-2 fixes/features logged in PROGRESS.md
 "Round-2 live feedback" — Focus-dim bug (2D path; the GPU no-op is now fixed), palette-result-click
