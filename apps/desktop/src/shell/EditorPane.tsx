@@ -19,11 +19,14 @@ import { CodeMirrorHost } from '../editor/CodeMirrorHost';
 import { Icon } from '../icons/Icon';
 import { editorKind } from '../editor/editorKind';
 import { parseOutline } from '../editor/outline';
+import { useSettings } from '../settings/SettingsContext';
 
 // Lazy-split the viewers so pdfjs/mammoth/dompurify stay OFF the critical path (the
 // project's three.js/ShaderBackdrop pattern) — loaded only when a binary is opened.
 const PdfView = lazy(() => import('../editor/PdfView').then((m) => ({ default: m.PdfView })));
 const DocxView = lazy(() => import('../editor/DocxView').then((m) => ({ default: m.DocxView })));
+// markdown-it (+ DOMPurify) ride the reading view — lazy so they stay off the boot chunk.
+const ReadingView = lazy(() => import('../editor/ReadingView').then((m) => ({ default: m.ReadingView })));
 
 interface Props {
   note: NoteDto | null;
@@ -84,6 +87,13 @@ export function EditorPane({
   const [sizeBytes, setSizeBytes] = useState<number | null>(null);
   const [related, setRelated] = useState<SemanticResult | null>(null);
   const [rebuiltNonce, setRebuiltNonce] = useState(0);
+  // v2.3 reading mode: per-note edit/read, seeded from the Default-view setting (leg 4 lifts
+  // this to per-tab). Resets to the default whenever the open note changes.
+  const settings = useSettings();
+  const [mode, setMode] = useState<'edit' | 'read'>(settings.defaultView);
+  useEffect(() => {
+    setMode(settings.defaultView);
+  }, [note?.path, settings.defaultView]);
 
   // Refetch related notes after a full reindex / cluster recompute (index:rebuilt) so the
   // panel self-heals from "recompute to enable" → populated without a note switch.
@@ -212,6 +222,15 @@ export function EditorPane({
         <Breadcrumb path={segments} current={note?.title ?? 'No note open'} />
         <div className="editor-actions">
           <button
+            className={`ea-btn${mode === 'read' ? ' active' : ''}`}
+            title={mode === 'read' ? 'Switch to editing' : 'Switch to reading'}
+            type="button"
+            disabled={!note}
+            onClick={() => setMode((m) => (m === 'read' ? 'edit' : 'read'))}
+          >
+            <Icon name={mode === 'read' ? 'edit' : 'book'} size="sm" />
+          </button>
+          <button
             className={`ea-btn${panel === 'outline' ? ' active' : ''}`}
             title="Outline"
             type="button"
@@ -286,14 +305,20 @@ export function EditorPane({
           </div>
         )}
 
-        <CodeMirrorHost
-          className="note-body cm-host"
-          doc={doc}
-          notePath={note?.path ?? null}
-          onChangeDoc={onChangeDoc}
-          onWikiClick={onWikiClick}
-          editorViewRef={editorViewRef}
-        />
+        {mode === 'read' ? (
+          <Suspense fallback={<div className="bv-status">Rendering…</div>}>
+            <ReadingView className="note-body" doc={doc} onWikiClick={onWikiClick} />
+          </Suspense>
+        ) : (
+          <CodeMirrorHost
+            className="note-body cm-host"
+            doc={doc}
+            notePath={note?.path ?? null}
+            onChangeDoc={onChangeDoc}
+            onWikiClick={onWikiClick}
+            editorViewRef={editorViewRef}
+          />
+        )}
 
         {backlinks.length > 0 && (
           <div className="backlinks">

@@ -88,10 +88,9 @@ export function SettingsPane({
             onChange={(v) => set({ alwaysFocusNewTabs: v })}
           />
           <Select
-            label="Default view for new tabs"
-            hint="The view a new Markdown tab opens in (reading mode lands later in v2.3 — disabled for now)"
+            label="Default view for new notes"
+            hint="The view a Markdown note opens in"
             value={s.defaultView}
-            disabled
             options={[
               { value: 'edit', label: 'Editing' },
               { value: 'read', label: 'Reading' },

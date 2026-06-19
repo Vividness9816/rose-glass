@@ -28,7 +28,9 @@ export type IconName =
   | 'clock'
   | 'words'
   | 'backlink'
-  | 'sliders';
+  | 'sliders'
+  | 'book'
+  | 'edit';
 
 // A zero-length round-capped line renders as a dot (the lucide trick), used for info/alert.
 const PATHS: Record<IconName, ReactNode> = {
@@ -163,6 +165,18 @@ const PATHS: Record<IconName, ReactNode> = {
       <line x1="21" y1="19" x2="11" y2="19" />
       <line x1="7" y1="19" x2="3" y2="19" />
       <line x1="11" y1="17" x2="11" y2="21" />
+    </>
+  ),
+  book: (
+    <>
+      <path d="M12 6.5C10.4 5.2 8 4.5 4 4.5v13c4 0 6.4.7 8 2 1.6-1.3 4-2 8-2v-13c-4 0-6.4.7-8 2z" />
+      <line x1="12" y1="6.5" x2="12" y2="20.5" />
+    </>
+  ),
+  edit: (
+    <>
+      <path d="M4 20h4L18.5 9.5a2 2 0 0 0-2.83-2.83L5 17.17z" />
+      <line x1="14.5" y1="8" x2="17.5" y2="11" />
     </>
   ),
 };
