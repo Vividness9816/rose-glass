@@ -19,7 +19,6 @@ import { CodeMirrorHost } from '../editor/CodeMirrorHost';
 import { Icon } from '../icons/Icon';
 import { editorKind } from '../editor/editorKind';
 import { parseOutline } from '../editor/outline';
-import { useSettings } from '../settings/SettingsContext';
 
 // Lazy-split the viewers so pdfjs/mammoth/dompurify stay OFF the critical path (the
 // project's three.js/ShaderBackdrop pattern) — loaded only when a binary is opened.
@@ -34,6 +33,9 @@ interface Props {
   backlinks: BacklinkDto[];
   /** When set, a non-markdown binary (pdf/docx) is open instead of a note. */
   binaryPath: string | null;
+  /** v2.3: per-tab edit/read mode (owned by the active tab in Shell). */
+  mode: 'edit' | 'read';
+  onToggleMode: () => void;
   onChangeDoc: (doc: string) => void;
   onOpenPath: (path: string) => void;
   onWikiClick: (target: string) => void;
@@ -74,6 +76,8 @@ export function EditorPane({
   doc,
   backlinks,
   binaryPath,
+  mode,
+  onToggleMode,
   onChangeDoc,
   onOpenPath,
   onWikiClick,
@@ -87,13 +91,6 @@ export function EditorPane({
   const [sizeBytes, setSizeBytes] = useState<number | null>(null);
   const [related, setRelated] = useState<SemanticResult | null>(null);
   const [rebuiltNonce, setRebuiltNonce] = useState(0);
-  // v2.3 reading mode: per-note edit/read, seeded from the Default-view setting (leg 4 lifts
-  // this to per-tab). Resets to the default whenever the open note changes.
-  const settings = useSettings();
-  const [mode, setMode] = useState<'edit' | 'read'>(settings.defaultView);
-  useEffect(() => {
-    setMode(settings.defaultView);
-  }, [note?.path, settings.defaultView]);
 
   // Refetch related notes after a full reindex / cluster recompute (index:rebuilt) so the
   // panel self-heals from "recompute to enable" → populated without a note switch.
@@ -226,7 +223,7 @@ export function EditorPane({
             title={mode === 'read' ? 'Switch to editing' : 'Switch to reading'}
             type="button"
             disabled={!note}
-            onClick={() => setMode((m) => (m === 'read' ? 'edit' : 'read'))}
+            onClick={onToggleMode}
           >
             <Icon name={mode === 'read' ? 'edit' : 'book'} size="sm" />
           </button>

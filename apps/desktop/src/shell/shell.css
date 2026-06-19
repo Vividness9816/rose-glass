@@ -377,3 +377,73 @@ button.bl-item { width: 100%; text-align: left; font: inherit; color: inherit; c
 }
 .sb-theme:hover { color: var(--text-1); }
 .sb-live-dot { color: var(--rose-bright); }
+
+/* v2.3 — editor column = tab strip above the editor pane (grid column 2). */
+.editor-with-tabs {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.editor-with-tabs > .editor-pane {
+  flex: 1;
+  min-height: 0;
+}
+
+/* v2.3 — document tab strip above the editor pane (mirrors the terminal-tab look). */
+.editor-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  flex-shrink: 0;
+  padding: 0 8px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border-mid);
+}
+.editor-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 4px 0 9px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  color: var(--text-3);
+  cursor: default;
+  flex-shrink: 0;
+  max-width: 180px;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.editor-tab:hover {
+  color: var(--text-2);
+}
+.editor-tab.active {
+  background: var(--surface-2);
+  border-color: var(--border-mid);
+  color: var(--text-1);
+}
+.editor-tab-label {
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editor-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 3px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  cursor: default;
+  flex-shrink: 0;
+}
+.editor-tab-close:hover {
+  background: var(--surface-3);
+  color: var(--rose-bright);
+}
