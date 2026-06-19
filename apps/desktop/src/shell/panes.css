@@ -154,3 +154,97 @@
   color: var(--text-3);
   word-break: break-all;
 }
+
+/* Settings sections + toggle/select controls (v2.3) */
+.sp-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sp-section-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-mid);
+}
+.rg-toggle,
+.rg-select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: default;
+}
+.rg-toggle.disabled,
+.rg-select.disabled {
+  opacity: 0.5;
+}
+.rg-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.rg-toggle-label {
+  font-size: 13px;
+  color: var(--text-1);
+}
+.rg-toggle-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-3);
+}
+.rg-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.rg-toggle-track {
+  position: relative;
+  flex-shrink: 0;
+  width: 34px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.rg-toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-3);
+  transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.rg-toggle input:checked + .rg-toggle-track {
+  background: var(--rose-glow);
+  border-color: var(--rose);
+}
+.rg-toggle input:checked + .rg-toggle-track::after {
+  transform: translateX(16px);
+  background: var(--rose-bright);
+}
+.rg-toggle input:focus-visible + .rg-toggle-track {
+  outline: 2px solid var(--rose);
+  outline-offset: 2px;
+}
+.rg-select select {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-1);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 4px 8px;
+}
+.rg-select select:disabled {
+  opacity: 0.6;
+}
