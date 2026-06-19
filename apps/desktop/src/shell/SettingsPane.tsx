@@ -3,7 +3,7 @@
    compartments). The two tab-dependent Editor settings render disabled until tabs (leg 4)
    + reading mode (leg 3) land. General version/Help arrive in leg 5. */
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { activityHookArm, activityHookDisarm, activityHookPlan, inTauri } from '../ipc';
 import type { Theme } from '../appearance/theme';
 import { Icon } from '../icons/Icon';
@@ -26,17 +26,46 @@ export function SettingsPane({
   vault,
   onReindex,
   reindexing,
+  onHelp,
 }: {
   theme: Theme;
   onToggleTheme: () => void;
   vault: string;
   onReindex: () => void;
   reindexing: boolean;
+  onHelp: () => void;
 }) {
   const s = useSettings();
   const set = useSetSettings();
   const [hookMsg, setHookMsg] = useState('');
   const [hookBusy, setHookBusy] = useState(false);
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    if (!inTauri()) return;
+    let active = true;
+    void import('@tauri-apps/api/app')
+      .then(({ getVersion }) => getVersion())
+      .then((v) => {
+        if (active) setVersion(v);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+  const checkForUpdates = async () => {
+    const url = 'https://github.com/Vividness9816/rose-glass/releases';
+    try {
+      if (inTauri()) {
+        const { openUrl } = await import('@tauri-apps/plugin-opener');
+        await openUrl(url);
+      } else {
+        window.open(url, '_blank');
+      }
+    } catch (e) {
+      console.error('open releases failed:', e);
+    }
+  };
   const runHook = async (action: 'plan' | 'arm' | 'disarm') => {
     if (hookBusy || !inTauri()) return;
     if (action === 'arm') {
@@ -76,6 +105,19 @@ export function SettingsPane({
           <div className="sp-field">
             <div className="sp-field-label">Vault</div>
             <div className="sp-field-value">{vault}</div>
+          </div>
+          <div className="sp-field">
+            <div className="sp-field-label">Version</div>
+            <div className="sp-field-value">{version ?? '—'}</div>
+            <button type="button" className="sp-btn" onClick={() => void checkForUpdates()}>
+              Check for updates
+            </button>
+          </div>
+          <div className="sp-field">
+            <div className="sp-field-label">Help</div>
+            <button type="button" className="sp-btn" onClick={onHelp}>
+              What is Rose Glass?
+            </button>
           </div>
         </Section>
 

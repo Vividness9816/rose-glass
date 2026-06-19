@@ -25,6 +25,8 @@ import { Backdrop } from '../backdrop/Backdrop';
 const TerminalPane = lazy(() =>
   import('../terminal/TerminalPane').then((m) => ({ default: m.TerminalPane })),
 );
+// v2.3: lazy so markdown-it (via ReadingView) stays off the boot chunk.
+const HelpOverlay = lazy(() => import('./HelpOverlay').then((m) => ({ default: m.HelpOverlay })));
 import { isUnattended } from '../terminal/attention';
 import { Splitter } from './Splitter';
 import { clampFraction, clampPx, nextFraction, TERM_H_DEFAULT, TERM_H_MIN } from './splitLogic';
@@ -98,6 +100,7 @@ export function Shell() {
   const [doc, setDoc] = useState('');
   const [binaryPath, setBinaryPath] = useState<string | null>(null); // Phase 9: open pdf/docx (not an indexed note)
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false); // v2.3 Help overlay
   const [paletteQuery, setPaletteQuery] = useState<string | undefined>(undefined); // pre-fill (tag search)
   const [terminalOpen, setTerminalOpen] = useState(false); // is the terminal drawer VISIBLE
   const [terminals, setTerminals] = useState<number[]>([]); // open tab ids — each is a live PTY kept alive while hidden
@@ -852,6 +855,7 @@ export function Shell() {
             vault={vault}
             onReindex={() => void onReindex()}
             reindexing={reindexing}
+            onHelp={() => setHelpOpen(true)}
           />
         ) : (
           <div className="editor-with-tabs">
@@ -904,6 +908,11 @@ export function Shell() {
           }}
           initialQuery={paletteQuery}
         />
+      )}
+      {helpOpen && (
+        <Suspense fallback={null}>
+          <HelpOverlay onClose={() => setHelpOpen(false)} />
+        </Suspense>
       )}
       {/* Once opened, the drawer stays MOUNTED so its PTYs keep running; Ctrl+` just
           hides it (display:none). Each tab is a keyed TerminalPane — only the active one
