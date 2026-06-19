@@ -11,15 +11,30 @@ Code directly.
 
 ## Status
 
-Phases 0–11 are built, reviewed, and committed: shell, vault indexer + SQLite/FTS5 + watcher,
-CodeMirror 6 editor, ⌘K search, living backdrop + glass, embedded terminal, CC activity mirror
-(M1 transcript-tail), WebGPU graph renderer, read-only MCP sidecar, neural clusters, and the
-**lossless-only editor engines** (PDF view-only + Word view/edit-as-Markdown-sibling). Remaining
-to v1.0: a few live app-window eyeball checks and the **Phase 12** §20 acceptance gate. See
-**[ROADMAP.md](ROADMAP.md)** for the phase plan and **[STATUS.md](STATUS.md)** for §20 acceptance
-progress (each proven row cites a commit + artifact). Execution + key forks are recorded in the
-ADRs under `~/.claude/second-brain/decisions/` (`-rose-glass-execution-strategy`,
-`-rose-glass-phase8-activity-mechanism`, `-rose-glass-phase9-editor-engines`).
+**v1.0 shipped** (tag `v1.0`): shell, vault indexer + SQLite/FTS5 + watcher, CodeMirror 6 editor,
+⌘K search, living backdrop + glass, embedded terminal, CC activity mirror (M1 transcript-tail),
+WebGPU graph renderer, read-only MCP sidecar, neural clusters, semantic search, and the
+**lossless-only editor engines** (PDF view-only + Word view/edit-as-Markdown-sibling).
+
+**v2.0** (branch `feat/v2.0`) adds:
+
+- **Drag-and-drop ingest** — drop a file on the window; it's copied into `inbox/` (if outside the
+  vault), indexed (md/txt become graph nodes), and opened in the right pane.
+- **Customizable graph** — an expandable panel (top-right of the graph) tunes gravity, node
+  strength, movement, liveliness, per-cluster colors, and free-float vs fixed mode; persisted.
+- **Home-dir-scale indexing** — the `ignore` crate + a shared skip floor across every index path,
+  so opening `~` indexes the real notes, not `node_modules`/build junk.
+- **Embedding durability** — the model is cached in app state; a failed fetch is remembered with a
+  **Retry** affordance (no silent re-download); search latency is surfaced; a model swap purges
+  stale vectors.
+- **Hardening** — a real CSP, a canonicalized vault root for activity scope, a bounded/coalesced
+  watcher, a pre-attach terminal ring buffer (no lost first prompt), and a documented
+  **[threat model](docs/THREAT-MODEL.md)** (the terminal is intentional RCE by design).
+- **Signed installer** — `tauri build` emits a code-signed NSIS/MSI (Verified publisher: Dylan N).
+
+See **[ROADMAP.md](ROADMAP.md)** / **[STATUS.md](STATUS.md)** for phase + acceptance detail, the
+v2.0 design under **[docs/superpowers/specs](docs/superpowers/specs/)**, and the founding decisions
+in `~/.claude/second-brain/decisions/` (notably `ADR-20260618-rose-glass-v2-architecture`).
 
 ## Stack
 

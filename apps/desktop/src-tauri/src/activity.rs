@@ -12,9 +12,14 @@
 //!
 //! Classification is purely lexical (no filesystem access): a path that escapes the
 //! vault via `..` fails closed to `External`, so an escape cannot masquerade as a
-//! vault node. ponytail: symlink-escape (a symlink inside the vault pointing out) is
-//! not resolved — only the vault-relative key would ever render, never the real
-//! target; upgrade with `std::fs::canonicalize` if that ever matters.
+//! vault node. The vault root is canonicalized once at open-time (commands::open_vault
+//! → canonical_root), so 8.3 short-names / case / a symlinked *root* compare correctly.
+//! RESIDUAL (display-only, documented per ADR-20260618-v2): a symlink *inside* the
+//! vault pointing out is still NOT FS-resolved per-event — doing so would cost a
+//! syscall on every line and break delete-event classification (the file is gone, so
+//! canonicalize fails). Worst case is a vault-relative key rendering for a file whose
+//! bytes live elsewhere; `fs_safe` resolves symlinks for every real file operation,
+//! so this is a label, not an exfiltration.
 
 use serde::Serialize;
 use std::collections::HashMap;

@@ -43,6 +43,7 @@ import {
   activityStop,
   getBacklinks,
   getGraphPayload,
+  ingestDroppedFile,
   getNote,
   inTauri,
   onActivityAnomaly,
@@ -53,6 +54,7 @@ import {
   openVault,
   readNoteFile,
   recomputeClusters,
+  retryEmbeddingModel,
   reindex,
   resolveLink,
   saveNoteFile,
@@ -86,6 +88,7 @@ export function Shell() {
   const activeTermRef = useRef(activeTerm);
   activeTermRef.current = activeTerm;
   const [clustering, setClustering] = useState(false); // Phase 11 embed+cluster in progress
+  const [clusterError, setClusterError] = useState<string | null>(null); // v2.0 model-load failure → Retry
   const [reindexing, setReindexing] = useState(false); // Settings: manual index rebuild in progress
   const [railView, setRailView] = useState('graph'); // which IconRail view; 'activity' swaps the right pane
   const [activity, setActivity] = useState<ActivityState>(emptyActivity); // Phase 8 ephemeral ring
@@ -207,14 +210,28 @@ export function Shell() {
   const onCluster = useCallback(async () => {
     if (clustering || !inTauri()) return;
     setClustering(true);
+    setClusterError(null);
     try {
       await recomputeClusters();
     } catch (e) {
+      // v2.0: a failed ~90MB model fetch is remembered backend-side; surface a Retry
+      // instead of only logging it (the Retry resets the cache then re-attempts).
       console.error('recompute clusters failed:', e);
+      setClusterError(String(e));
     } finally {
       setClustering(false);
     }
   }, [clustering]);
+
+  // v2.0 Retry affordance: clear the remembered model-load failure, then re-cluster.
+  const onRetryCluster = useCallback(async () => {
+    try {
+      await retryEmbeddingModel();
+    } catch {
+      /* reset is best-effort; the re-cluster below reports the real outcome */
+    }
+    await onCluster();
+  }, [onCluster]);
 
   // ⌘K / Ctrl+K opens the palette; the palette owns its own close (so pressing
   // ⌘K inside it can't bubble here and re-toggle).
@@ -477,6 +494,41 @@ export function Shell() {
     };
   }, [refreshGraph]);
 
+  // v2.0: drag a file onto the window → ingest it (copy into inbox/ if outside the vault,
+  // index md/txt so an orphan node appears) and open it in the right pane. Uses Tauri's
+  // native webview drag-drop (real absolute paths; HTML5 dnd can't provide them).
+  useEffect(() => {
+    if (!inTauri()) return;
+    let active = true;
+    let un: (() => void) | undefined;
+    void (async () => {
+      const { getCurrentWebview } = await import('@tauri-apps/api/webview');
+      const u = await getCurrentWebview().onDragDropEvent(async (event) => {
+        if (event.payload.type !== 'drop') return;
+        let opened = false;
+        for (const p of event.payload.paths) {
+          try {
+            const r = await ingestDroppedFile(p);
+            // Open only the first successfully-ingested file; the rest still get indexed.
+            if (!opened) {
+              if (r.kind === 'note') await openNote(r.rel);
+              else openBinary(r.rel);
+              opened = true;
+            }
+          } catch (e) {
+            console.error('drop ingest failed for', p, e); // ponytail: surface as a toast later
+          }
+        }
+      });
+      if (active) un = u;
+      else u();
+    })();
+    return () => {
+      active = false;
+      un?.();
+    };
+  }, [openNote, openBinary]);
+
   // Persist the active rail view so the app resumes on the same pane.
   useEffect(() => {
     saveSession({ railView });
@@ -553,6 +605,8 @@ export function Shell() {
           onOpenVault={openVaultFlow}
           onCluster={onCluster}
           clustering={clustering}
+          clusterError={clusterError}
+          onRetryCluster={onRetryCluster}
           pulseRef={graphPulseRef}
           onOpenNode={(p) => {
             setRailView('graph'); // surface the editor for the clicked note

@@ -36,6 +36,7 @@ import type { GraphRendererLike } from '../Renderer';
 import { type Camera, IDENTITY_CAMERA, panBy, screenToWorld, zoomAt } from '../camera';
 import { nodeAtWorld } from '../hitTest';
 import { stepSimulation } from '../simulation';
+import { DEFAULT_CONFIG, type GraphConfig } from '../config';
 import { indexNodesByPath, lookupNodeByRel } from '../GraphRenderer';
 import { RIBBON_STRIDE, ribbonInto, sampleQuadratic, type RGB01, type Vec2 } from './ribbon';
 import { layoutLabelAtlas } from './labelAtlas';
@@ -214,6 +215,7 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
   private camera: Camera = IDENTITY_CAMERA;
   private draggingId: number | null = null;
   private theme: GraphTheme;
+  private config: GraphConfig = DEFAULT_CONFIG; // v2.0 user-tunable physics
   private W: number;
   private H: number;
   private dpr: number;
@@ -489,6 +491,9 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
 
   setTheme(theme: GraphTheme) {
     this.theme = theme;
+  }
+  setConfig(config: GraphConfig) {
+    this.config = config;
   }
   setSize(w: number, h: number, dpr = this.dpr) {
     this.dpr = dpr;
@@ -900,7 +905,7 @@ export class WebGpuGraphRenderer implements GraphRendererLike {
     const px = drag?.x;
     const py = drag?.y;
     this.tick++;
-    stepSimulation(data.nodes, this.W, this.H);
+    stepSimulation(data.nodes, this.W, this.H, undefined, this.config);
     if (drag && px !== undefined && py !== undefined) {
       drag.x = px;
       drag.y = py;

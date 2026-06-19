@@ -5,6 +5,7 @@
 
 use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
 use std::path::Path;
+use std::sync::Mutex;
 
 #[allow(dead_code)] // the model's output dim — asserted by the embed spike + documents the schema
 pub const EMBED_DIM: usize = 384; // all-MiniLM-L6-v2
@@ -42,9 +43,77 @@ pub fn blob_to_vec(b: &[u8]) -> Vec<f32> {
         .collect()
 }
 
+/// The cached embedding model + its load state, held in `AppState` (v2.0). The ~90MB
+/// model loads ONCE and is reused; a FAILED load is remembered so search doesn't silently
+/// re-download on every call (the UI surfaces a Retry that calls `reset_model`). Held
+/// behind a Mutex because `embed()` needs `&mut` AND because serializing the build avoids
+/// the cache-dir race two concurrent `new_model()` calls would hit.
+#[derive(Default)]
+pub enum ModelCache {
+    #[default]
+    Uninit,
+    Ready(TextEmbedding),
+    Failed(String),
+}
+
+/// Lazily build the model once, then run `f` against it. A prior failure short-circuits
+/// (returns the cached error, NO re-download). `cache_dir` holds the downloaded ONNX model
+/// (outside the vault). ponytail: we rely on hf-hub's own HTTP timeouts for the fetch — we
+/// do NOT spawn a kill-able download thread, because `recv_timeout` cannot cancel it and
+/// would orphan a writer racing a cache wipe (see ADR-20260618-rose-glass-v2-architecture).
+/// We never wipe the cache dir: a partial download completes on a later attempt.
+pub fn with_model<T>(
+    cache: &Mutex<ModelCache>,
+    cache_dir: &Path,
+    f: impl FnOnce(&mut TextEmbedding) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+    match &*guard {
+        ModelCache::Failed(e) => return Err(e.clone()),
+        ModelCache::Uninit => match new_model(cache_dir) {
+            Ok(m) => *guard = ModelCache::Ready(m),
+            Err(e) => {
+                *guard = ModelCache::Failed(e.clone());
+                return Err(e);
+            }
+        },
+        ModelCache::Ready(_) => {}
+    }
+    match &mut *guard {
+        ModelCache::Ready(m) => f(m),
+        _ => unreachable!("set Ready or returned above"),
+    }
+}
+
+/// Drop a cached model / clear a remembered failure so the next `with_model` rebuilds —
+/// the "Retry" affordance after a failed model fetch.
+pub fn reset_model(cache: &Mutex<ModelCache>) {
+    *cache.lock().unwrap_or_else(|e| e.into_inner()) = ModelCache::Uninit;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_cache_short_circuits_without_rebuild() {
+        // The council-critical path: a remembered failure must NOT re-download, and the
+        // embed closure must not run (it only runs on Ready).
+        let cache = Mutex::new(ModelCache::Failed("boom".into()));
+        let mut ran = false;
+        let r: Result<(), String> = with_model(&cache, Path::new("/nonexistent"), |_m| {
+            ran = true;
+            Ok(())
+        });
+        assert_eq!(r, Err("boom".to_string()));
+        assert!(!ran, "closure must not run on a failed cache");
+        // Retry resets the state so a later attempt rebuilds.
+        reset_model(&cache);
+        assert!(matches!(
+            *cache.lock().unwrap_or_else(|e| e.into_inner()),
+            ModelCache::Uninit
+        ));
+    }
 
     #[test]
     fn blob_round_trips() {

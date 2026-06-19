@@ -45,11 +45,21 @@ export interface SemanticResult {
   /** true ⇒ some notes are unembedded since the last recompute; hits rank a partial corpus. */
   stale: boolean;
   hits: SemanticHit[];
+  /** v2.0 telemetry: KNN scan time in ms. */
+  elapsed_ms: number;
+  /** v2.0 telemetry: number of embedded notes scanned. */
+  corpus_size: number;
 }
 export interface OpenVaultResult {
   vault: string;
   note_count: number;
   rebuilt: boolean;
+}
+/** v2.0 drag-drop result: vault-relative path to open + whether it's an indexable note
+ *  (md/txt, also a graph node) or a viewer-only binary (pdf/docx). */
+export interface IngestResult {
+  rel: string;
+  kind: 'note' | 'binary';
 }
 export interface GraphNodeMeta {
   path: string;
@@ -91,6 +101,15 @@ export const relatedNotes = (path: string, k: number) =>
  *  slow; cache it in AppState before wiring debounced search). */
 export const semanticSearch = (query: string, k: number) =>
   invoke<SemanticResult>('semantic_search', { query, k });
+
+/** v2.0: reset the cached embedding model so the next recompute/search re-attempts the
+ *  ~90MB fetch — the Retry affordance after a failed (offline/interrupted) model load. */
+export const retryEmbeddingModel = () => invoke<void>('retry_embedding_model');
+
+/** v2.0: ingest a drag-dropped absolute path. Copies into <vault>/inbox/ if it's outside
+ *  the vault, indexes md/txt (orphan node appears), and returns what + how to open it. */
+export const ingestDroppedFile = (path: string) =>
+  invoke<IngestResult>('ingest_dropped_file', { path });
 
 export const readNoteFile = (path: string) => invoke<string>('read_note_file', { path });
 export const saveNoteFile = (path: string, content: string) =>
@@ -154,6 +173,10 @@ export const ptyWrite = (id: number, data: string) => invoke<void>('pty_write', 
 export const ptyResize = (id: number, cols: number, rows: number) =>
   invoke<void>('pty_resize', { id, cols, rows });
 export const ptyKill = (id: number) => invoke<void>('pty_kill', { id });
+/** v2.0: call AFTER wiring the pty:output listener — flushes bytes the reader buffered
+ *  pre-attach (as one ordered pty:output event) and switches the session to live emit,
+ *  closing the first-prompt race. */
+export const ptyAttach = (id: number) => invoke<void>('pty_attach', { id });
 
 export const onPtyOutput = (id: number, cb: (data: Uint8Array) => void): Promise<UnlistenFn> =>
   listen<{ id: number; data: number[] }>('pty:output', (e) => {

@@ -6,9 +6,9 @@ use super::hash::content_hash;
 use super::{parse_note, resolve, IndexOutcome, NoteIndex, ResolvedLink};
 use crate::db::queries::{self, NoteRow};
 use rusqlite::Connection;
+use ignore::WalkBuilder;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use walkdir::{DirEntry, WalkDir};
 
 fn now_ms() -> i64 {
     SystemTime::now()
@@ -33,13 +33,30 @@ pub(crate) fn is_markdown(path: &Path) -> bool {
     )
 }
 
-/// Prune any entry whose name starts with '.' (.git, .rose-glass, .obsidian, …).
-fn is_hidden(entry: &DirEntry) -> bool {
-    entry
-        .file_name()
-        .to_str()
-        .map(|s| s.starts_with('.'))
-        .unwrap_or(false)
+/// Path segments that are never notes — build artifacts, deps, tool dirs. Combined
+/// with the dot-prefix rule this is the ONE skip floor shared by `full_rebuild`,
+/// `incremental`, AND the watcher, so all three converge on the same note set (A3).
+const SKIP_DIRS: &[&str] = &["node_modules", "target", "dist", "build", "vendor"];
+
+/// True if this vault-relative path lives under a hidden or skipped segment and must
+/// not be indexed. Operates on the forward-slash rel path so every write path agrees.
+/// ponytail: hardcoded floor, no per-project `.gitignore` parsing. `.gitignore` respect
+/// was dropped deliberately — a gitignored-but-not-skipped `.md` edited live would be
+/// watcher-indexed yet rebuild-excluded, breaking A3. Re-add only via a shared nested
+/// matcher across all three paths if it's ever worth the plumbing (see ADR-20260618-v2).
+pub(crate) fn should_skip(rel: &str) -> bool {
+    rel.split('/').any(|seg| {
+        if seg.starts_with('.') {
+            return true;
+        }
+        // Windows FS is case-insensitive — "Node_Modules" must skip like "node_modules"
+        // (mirrors activity.rs's Windows-only case-fold). On Linux those are distinct dirs.
+        if cfg!(windows) {
+            SKIP_DIRS.iter().any(|s| seg.eq_ignore_ascii_case(s))
+        } else {
+            SKIP_DIRS.contains(&seg)
+        }
+    })
 }
 
 /// Vault-relative, forward-slash path; `None` if the name isn't valid UTF-8.
@@ -68,14 +85,27 @@ pub fn full_rebuild(conn: &mut Connection, vault_root: &Path) -> rusqlite::Resul
 
     // PASS 1 — populate the path universe + notes/tags/fts; stash unresolved links
     let mut stash: Vec<(String, Vec<super::RawLink>)> = Vec::new();
-    for entry in WalkDir::new(vault_root)
-        .into_iter()
-        // always keep the root (depth 0) — the vault folder itself may be dot-prefixed;
-        // only prune hidden SUB-entries (.git/.rose-glass/.obsidian/…)
-        .filter_entry(|e| e.depth() == 0 || !is_hidden(e))
-        .filter_map(|e| e.ok())
-    {
-        if !entry.file_type().is_file() || !is_markdown(entry.path()) {
+    // `ignore::WalkBuilder` with standard filters OFF: we own the skip policy via
+    // `should_skip` so it is byte-identical to the incremental/watcher paths (A3).
+    // Symlinks are not followed (no loops). Pruning a dir here stops descent — so a
+    // home-dir vault skips node_modules/.git/etc. instead of walking 17k junk files.
+    let walker = {
+        let root = vault_root.to_path_buf();
+        WalkBuilder::new(vault_root)
+            .standard_filters(false)
+            .follow_links(false)
+            .filter_entry(move |e| match normalize_rel(&root, e.path()) {
+                // keep the root ("") and any non-UTF8 entry; the file-level filter
+                // below drops non-markdown / unreadable names
+                Some(rel) if !rel.is_empty() => !should_skip(&rel),
+                _ => true,
+            })
+            .build()
+    };
+    for entry in walker.filter_map(|e| e.ok()) {
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false)
+            || !is_markdown(entry.path())
+        {
             continue;
         }
         let Some(rel) = normalize_rel(vault_root, entry.path()) else {
@@ -116,6 +146,11 @@ pub fn incremental(
     vault_root: &Path,
     rel: &str,
 ) -> rusqlite::Result<IndexOutcome> {
+    // Same skip floor as full_rebuild/watcher — never index junk, so a live edit can't
+    // create a node a later rebuild would drop (A3).
+    if should_skip(rel) {
+        return Ok(IndexOutcome::Skipped);
+    }
     let abs = vault_root.join(rel);
     if !abs.exists() {
         return delete(conn, rel); // race: gone before we read
@@ -223,6 +258,57 @@ mod tests {
         }
         assert!(!paths.iter().any(|p| p.contains(".obsidian")));
         assert!(!paths.iter().any(|p| p.ends_with(".bak")));
+    }
+
+    #[test]
+    fn should_skip_is_the_shared_floor() {
+        for junk in [
+            "node_modules/pkg/README.md",
+            "a/target/debug/x.md",
+            "dist/bundle.md",
+            ".obsidian/workspace.md",
+            ".git/x.md",
+            "notes/.hidden.md",
+        ] {
+            assert!(should_skip(junk), "should skip {junk}");
+        }
+        for real in ["notes/real.md", "a/b/c.md", "inbox/dropped.md"] {
+            assert!(!should_skip(real), "should keep {real}");
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn should_skip_is_case_insensitive_on_windows() {
+        // Windows FS is case-insensitive: a mixed-case junk dir must still be skipped, else
+        // a live edit could index a note a rebuild drops (or vice versa).
+        assert!(should_skip("Node_Modules/pkg/x.md"));
+        assert!(should_skip("a/TARGET/debug/x.md"));
+        assert!(!should_skip("notes/real.md"));
+    }
+
+    #[test]
+    fn rebuild_and_incremental_agree_on_skip_floor() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        std::fs::write(root.join("node_modules/pkg/README.md"), b"junk").unwrap();
+        std::fs::write(root.join("notes/real.md"), b"real").unwrap();
+
+        // full_rebuild prunes the junk dir, keeps the real note
+        let mut conn = mem();
+        full_rebuild(&mut conn, root).unwrap();
+        let paths = note_paths(&conn);
+        assert!(paths.contains("notes/real.md"));
+        assert!(!paths.iter().any(|p| p.contains("node_modules")));
+
+        // incremental refuses the SAME junk path → no node a rebuild would drop (A3 parity)
+        assert_eq!(
+            incremental(&mut conn, root, "node_modules/pkg/README.md").unwrap(),
+            IndexOutcome::Skipped
+        );
+        assert!(!note_paths(&conn).iter().any(|p| p.contains("node_modules")));
     }
 
     #[test]

@@ -6,12 +6,15 @@
 import type { Camera } from './camera';
 import type { GraphNode } from './types';
 import type { GraphTheme } from './themeColors';
+import type { GraphConfig } from './config';
 
 export interface GraphRendererLike {
   start(): void;
   stop(): void;
   setSize(w: number, h: number, dpr?: number): void;
   setTheme(theme: GraphTheme): void;
+  /** v2.0: update the user-tunable physics (fed to the shared stepSimulation). */
+  setConfig(config: GraphConfig): void;
   // Phase 4 interaction (screen coords = CSS px; camera maps to world)
   getCamera(): Camera;
   zoomAtScreen(sx: number, sy: number, factor: number): void;

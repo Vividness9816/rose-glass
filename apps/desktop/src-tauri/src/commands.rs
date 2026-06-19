@@ -10,8 +10,37 @@ use crate::indexer::pipeline;
 use crate::state::{lock, AppState};
 use crate::watcher;
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager, State};
+
+/// Canonicalize the vault root once at open-time so scope/skip comparisons are robust
+/// to 8.3 short names, case, and a symlinked vault root. The Windows `\\?\` verbatim
+/// prefix is stripped so the stored root matches the un-prefixed absolute paths both
+/// the file dialog and Claude Code report (else activity scope would classify
+/// everything External). Residual: a symlink INSIDE the vault pointing out is still
+/// classified lexically, not FS-resolved — display-only, `fs_safe` guards real ops
+/// (ADR-20260618-rose-glass-v2-architecture).
+fn canonical_root(p: &Path) -> PathBuf {
+    strip_verbatim(std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf()))
+}
+
+/// Strip the Windows `\\?\` verbatim prefix so canonical paths compare against the
+/// un-prefixed forms the dialog / drag-drop / CC report. No-op on non-Windows. UNC paths
+/// (`\\?\UNC\server\share\…`) are rewritten to their reported `\\server\share\…` form —
+/// otherwise a network-hosted vault's activity would all mis-classify as External.
+fn strip_verbatim(c: PathBuf) -> PathBuf {
+    if cfg!(windows) {
+        if let Some(s) = c.to_str() {
+            if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+                return PathBuf::from(format!(r"\\{rest}"));
+            }
+            if let Some(rest) = s.strip_prefix(r"\\?\") {
+                return PathBuf::from(rest);
+            }
+        }
+    }
+    c
+}
 
 #[derive(Serialize)]
 pub struct IpcError(pub String);
@@ -43,10 +72,13 @@ pub async fn open_vault(
     app: AppHandle,
     path: String,
 ) -> Result<OpenVaultResultDto, IpcError> {
-    let root = PathBuf::from(&path);
-    if !root.is_dir() {
+    let supplied = PathBuf::from(&path);
+    if !supplied.is_dir() {
         return Err(IpcError(format!("not a directory: {path}")));
     }
+    // Canonicalize once here so every downstream comparison (indexer skip, watcher,
+    // activity scope) shares one robust root form.
+    let root = canonical_root(&supplied);
     let db_dir = root.join(".rose-glass");
     std::fs::create_dir_all(&db_dir)?;
     // Keep the derived cache out of the user's vault git repo.
@@ -55,6 +87,10 @@ pub async fn open_vault(
 
     let mut conn = db::open_db(&db_path)?;
     db::migrate(&conn)?;
+    // v2.0 model-version guard: drop embeddings from any other model before they could be
+    // miscounted as fresh. Reads already filter by model; this reclaims space + makes the
+    // freshness check honest. No re-embed here — the user runs Clusters when they want it.
+    let _ = queries::purge_stale_embeddings(&conn, crate::embed::MODEL_NAME)?;
     let count = pipeline::full_rebuild(&mut conn, &root)?;
 
     // Stop the old watcher BEFORE swapping/spawning so there's never a transient
@@ -68,7 +104,9 @@ pub async fn open_vault(
 
     let _ = app.emit("index:rebuilt", serde_json::json!({ "note_count": count }));
     Ok(OpenVaultResultDto {
-        vault: path,
+        // report the canonical root so the frontend's Open-file relativizer matches
+        // the same form the indexer/activity use
+        vault: root.to_string_lossy().to_string(),
         note_count: count as i64,
         rebuilt: true,
     })
@@ -257,8 +295,12 @@ pub async fn recompute_clusters(
     // Embed without the DB lock (model load + inference is slow). Borrow the texts (no
     // second copy of the corpus); rows stays alive for the zip below.
     let texts: Vec<&str> = rows.iter().map(|(_, t)| t.as_str()).collect();
-    let mut model = crate::embed::new_model(&cache).map_err(IpcError)?;
-    let vectors = crate::embed::embed_texts(&mut model, &texts).map_err(IpcError)?;
+    // Embed via the AppState model cache: loads the ~90MB model once, reused across calls,
+    // and a failed load is remembered (Retry via retry_embedding_model). No cache wipe.
+    let vectors = crate::embed::with_model(&state.model, &cache, |m| {
+        crate::embed::embed_texts(m, &texts)
+    })
+    .map_err(IpcError)?;
 
     let items: Vec<(String, Vec<f32>)> = rows.into_iter().map(|(p, _)| p).zip(vectors).collect();
     let now = std::time::SystemTime::now()
@@ -291,6 +333,11 @@ pub struct SemanticResult {
     pub ready: bool,
     pub stale: bool,
     pub hits: Vec<SemanticHit>,
+    /// v2.0 telemetry (ADR-20260618-v2): KNN scan time + corpus size, returned in the
+    /// response (surfaced in the UI) instead of logged to a swallowed stderr — the
+    /// "measure before optimizing" signal for the deferred sqlite-vec decision.
+    pub elapsed_ms: u64,
+    pub corpus_size: usize,
 }
 
 /// Phase 13: notes most semantically similar to `path`, by cosine over the stored
@@ -307,17 +354,25 @@ pub async fn related_notes(
     let db = lock(&state.db);
     let (emb, notes) = queries::embedding_freshness(&db, crate::embed::MODEL_NAME)?;
     if emb == 0 {
-        return Ok(SemanticResult { ready: false, stale: false, hits: vec![] });
+        return Ok(SemanticResult { ready: false, stale: false, hits: vec![], elapsed_ms: 0, corpus_size: 0 });
     }
     let corpus = queries::read_embeddings(&db, crate::embed::MODEL_NAME)?;
     let stale = emb < notes;
     // The open note may not be embedded yet (added since the last recompute): no query
     // vector ⇒ no neighbours, but report stale so the UI can prompt a recompute.
     let Some((_, query_vec)) = corpus.iter().find(|(p, _)| p == &path).cloned() else {
-        return Ok(SemanticResult { ready: true, stale: true, hits: vec![] });
+        return Ok(SemanticResult { ready: true, stale: true, hits: vec![], elapsed_ms: 0, corpus_size: corpus.len() });
     };
+    let t0 = std::time::Instant::now();
     let scored = crate::knn::knn(&query_vec, &corpus, k, Some(&path));
-    Ok(SemanticResult { ready: true, stale, hits: queries::titles_for(&db, scored) })
+    let elapsed_ms = t0.elapsed().as_millis() as u64;
+    Ok(SemanticResult {
+        ready: true,
+        stale,
+        hits: queries::titles_for(&db, scored),
+        elapsed_ms,
+        corpus_size: corpus.len(),
+    })
 }
 
 /// Phase 13: free-text semantic search — embed `query` (local ONNX) and rank the stored
@@ -346,23 +401,40 @@ pub async fn semantic_search(
         let db = lock(&state.db);
         let (emb, notes) = queries::embedding_freshness(&db, crate::embed::MODEL_NAME)?;
         if emb == 0 {
-            return Ok(SemanticResult { ready: false, stale: false, hits: vec![] });
+            return Ok(SemanticResult { ready: false, stale: false, hits: vec![], elapsed_ms: 0, corpus_size: 0 });
         }
         (emb, notes, queries::read_embeddings(&db, crate::embed::MODEL_NAME)?)
     };
 
     let cache = app.path().app_cache_dir()?.join("models");
     std::fs::create_dir_all(&cache)?;
-    let mut model = crate::embed::new_model(&cache).map_err(IpcError)?;
-    let query_vec = crate::embed::embed_texts(&mut model, &[query])
-        .map_err(IpcError)?
-        .into_iter()
-        .next()
-        .unwrap_or_default();
+    let query_vec = crate::embed::with_model(&state.model, &cache, |m| {
+        crate::embed::embed_texts(m, std::slice::from_ref(&query))
+    })
+    .map_err(IpcError)?
+    .into_iter()
+    .next()
+    .unwrap_or_default();
 
+    let t0 = std::time::Instant::now();
     let scored = crate::knn::knn(&query_vec, &corpus, k, None);
+    let elapsed_ms = t0.elapsed().as_millis() as u64;
     let db = lock(&state.db);
-    Ok(SemanticResult { ready: true, stale: emb < notes, hits: queries::titles_for(&db, scored) })
+    Ok(SemanticResult {
+        ready: true,
+        stale: emb < notes,
+        hits: queries::titles_for(&db, scored),
+        elapsed_ms,
+        corpus_size: corpus.len(),
+    })
+}
+
+/// v2.0: reset the cached embedding model so the next recompute/search rebuilds it — the
+/// "Retry" affordance after a failed model fetch (offline / interrupted ~90MB download).
+#[tauri::command]
+pub async fn retry_embedding_model(state: State<'_, AppState>) -> Result<(), IpcError> {
+    crate::embed::reset_model(&state.model);
+    Ok(())
 }
 
 /// Phase 8: start the read-only CC activity tail (ADR-20260617 M1 — transcript-tail
@@ -434,5 +506,237 @@ pub async fn activity_hook_disarm() -> Result<String, IpcError> {
         Ok("Disarmed — the rose-glass hook was removed.".into())
     } else {
         Ok("Not armed — nothing to remove.".into())
+    }
+}
+
+/// Drag-drop result: the vault-relative path to open + whether it's an indexable note
+/// (md/txt → also a graph node) or a viewer-only binary (pdf/docx).
+#[derive(Serialize, Clone, Copy, PartialEq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum IngestKind {
+    Note,
+    Binary,
+}
+
+#[derive(Serialize)]
+pub struct IngestResult {
+    pub rel: String,
+    pub kind: IngestKind,
+}
+
+/// Allowed drop types. md/txt become notes (+graph nodes); pdf/docx are viewer-only
+/// (binaries aren't notes — ADR-20260617). Anything else is rejected.
+fn ingest_kind(ext: &str) -> Option<IngestKind> {
+    match ext.to_ascii_lowercase().as_str() {
+        "md" | "markdown" | "txt" => Some(IngestKind::Note),
+        "pdf" | "docx" => Some(IngestKind::Binary),
+        _ => None,
+    }
+}
+
+/// Pick a non-colliding destination in `dir` for `src`'s file name, claiming it atomically
+/// with `create_new` (no check-then-copy TOCTOU): `name.md`, then `name (1).md`, … The
+/// returned path is an empty file the caller's copy then overwrites.
+fn unique_dest(dir: &Path, src: &Path) -> Result<PathBuf, String> {
+    let name = Path::new(src.file_name().ok_or("dropped path has no file name")?);
+    let stem = name.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+    let ext = name.extension().and_then(|e| e.to_str());
+    for i in 0..1000 {
+        let candidate = if i == 0 {
+            dir.join(name)
+        } else if let Some(e) = ext {
+            dir.join(format!("{stem} ({i}).{e}"))
+        } else {
+            dir.join(format!("{stem} ({i})"))
+        };
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&candidate) {
+            Ok(_) => return Ok(candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("cannot create inbox file: {e}")),
+        }
+    }
+    Err("too many name collisions in inbox/".into())
+}
+
+/// Blocking core of `ingest_dropped_file` (runs off the async runtime). Canonicalizes the
+/// source (rejecting folders / unsupported types), copies it into `<vault>/inbox/` if it's
+/// outside the vault (atomic dedupe) or uses it in place if already inside, then indexes
+/// md/txt so an orphan node appears. pdf/docx are viewer-only.
+fn ingest_blocking(
+    root: &Path,
+    db: &std::sync::Mutex<rusqlite::Connection>,
+    abs_path: &str,
+) -> Result<IngestResult, String> {
+    // Re-canonicalize the root the SAME way as the source below, so the inside/outside
+    // decision compares like with like even if canonical_root fell back to a non-canonical
+    // path at open-time (then both forms are consistent — A path mismatch can't strand an
+    // in-vault file as "external").
+    let root_canon = strip_verbatim(std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf()));
+    let root = root_canon.as_path();
+    let src = strip_verbatim(
+        std::fs::canonicalize(abs_path).map_err(|e| format!("cannot resolve dropped file: {e}"))?,
+    );
+    if !std::fs::metadata(&src).map_err(|e| e.to_string())?.is_file() {
+        return Err("only files can be dropped, not folders".into());
+    }
+    let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let kind = ingest_kind(ext).ok_or_else(|| format!("unsupported file type: .{ext}"))?;
+
+    // Already inside the vault (both canonical, UNC-stripped) → use in place; outside →
+    // copy into <vault>/inbox/ with an atomic, deduped name (keeps the vault-relative model).
+    let rel = match pipeline::normalize_rel(root, &src).filter(|r| !r.is_empty()) {
+        Some(rel) => rel,
+        None => {
+            let inbox = root.join("inbox");
+            std::fs::create_dir_all(&inbox).map_err(|e| e.to_string())?;
+            let dest = unique_dest(&inbox, &src)?;
+            std::fs::copy(&src, &dest).map_err(|e| format!("copy into inbox failed: {e}"))?;
+            pipeline::normalize_rel(root, &dest).ok_or("copied file escaped the vault")?
+        }
+    };
+
+    if kind == IngestKind::Note {
+        let mut conn = db.lock().unwrap_or_else(|e| e.into_inner());
+        pipeline::incremental(&mut conn, root, &rel).map_err(|e| e.to_string())?;
+    }
+    Ok(IngestResult { rel, kind })
+}
+
+/// v2.0: ingest a drag-dropped file. md/txt → copied into the vault (if outside) + indexed
+/// (orphan graph node appears via the index:note refetch) + opened; pdf/docx → opened in
+/// the viewer (not a node). The fs copy + index run off the async runtime so a large file
+/// doesn't stall it.
+#[tauri::command]
+pub async fn ingest_dropped_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<IngestResult, IpcError> {
+    let root = lock(&state.vault_root)
+        .clone()
+        .ok_or_else(|| IpcError("no vault open".into()))?;
+    let db = state.db.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || ingest_blocking(&root, &db, &path))
+        .await
+        .map_err(|e| IpcError(e.to_string()))?
+        .map_err(IpcError)?;
+    // A new note → tell the graph so its orphan node appears (Shell refetches on index:note).
+    if result.kind == IngestKind::Note {
+        let _ = app.emit("index:note", serde_json::json!({ "path": result.rel, "op": "upsert" }));
+    }
+    Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ingest_kind_routes_extensions() {
+        assert_eq!(ingest_kind("md"), Some(IngestKind::Note));
+        assert_eq!(ingest_kind("MARKDOWN"), Some(IngestKind::Note));
+        assert_eq!(ingest_kind("txt"), Some(IngestKind::Note));
+        assert_eq!(ingest_kind("pdf"), Some(IngestKind::Binary));
+        assert_eq!(ingest_kind("docx"), Some(IngestKind::Binary));
+        assert_eq!(ingest_kind("png"), None);
+        assert_eq!(ingest_kind(""), None);
+    }
+
+    fn mem_db() -> std::sync::Mutex<rusqlite::Connection> {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        std::sync::Mutex::new(conn)
+    }
+
+    #[test]
+    fn ingest_outside_note_copies_into_inbox_and_indexes() {
+        let vault = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = canonical_root(vault.path());
+        let src = outside.path().join("dropped.md");
+        std::fs::write(&src, b"# Dropped\n[[nowhere]]").unwrap();
+
+        let db = mem_db();
+        let r = ingest_blocking(&root, &db, src.to_str().unwrap()).unwrap();
+        assert_eq!(r.kind, IngestKind::Note);
+        assert_eq!(r.rel, "inbox/dropped.md");
+        assert!(root.join("inbox/dropped.md").is_file(), "copied into inbox");
+        let n: i64 = db
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM notes WHERE path='inbox/dropped.md'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1, "the dropped note is indexed (orphan node)");
+    }
+
+    #[test]
+    fn ingest_dedupes_name_collision_atomically() {
+        let vault = tempfile::tempdir().unwrap();
+        let root = canonical_root(vault.path());
+        std::fs::create_dir_all(root.join("inbox")).unwrap();
+        std::fs::write(root.join("inbox/dropped.md"), b"existing").unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let src = outside.path().join("dropped.md");
+        std::fs::write(&src, b"new").unwrap();
+
+        let db = mem_db();
+        let r = ingest_blocking(&root, &db, src.to_str().unwrap()).unwrap();
+        assert_eq!(r.rel, "inbox/dropped (1).md", "collision → deduped name");
+        assert_eq!(std::fs::read(root.join("inbox/dropped.md")).unwrap(), b"existing", "original untouched");
+    }
+
+    #[test]
+    fn ingest_binary_opens_viewer_without_indexing() {
+        let vault = tempfile::tempdir().unwrap();
+        let root = canonical_root(vault.path());
+        let outside = tempfile::tempdir().unwrap();
+        let src = outside.path().join("paper.pdf");
+        std::fs::write(&src, b"%PDF-1.7").unwrap();
+
+        let db = mem_db();
+        let r = ingest_blocking(&root, &db, src.to_str().unwrap()).unwrap();
+        assert_eq!(r.kind, IngestKind::Binary);
+        assert_eq!(r.rel, "inbox/paper.pdf");
+        let n: i64 = db.lock().unwrap().query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0, "a binary is not indexed as a note");
+    }
+
+    #[test]
+    fn ingest_rejects_directory_and_unknown_ext() {
+        let vault = tempfile::tempdir().unwrap();
+        let root = canonical_root(vault.path());
+        let db = mem_db();
+        let dir = tempfile::tempdir().unwrap();
+        assert!(ingest_blocking(&root, &db, dir.path().to_str().unwrap()).is_err(), "folder rejected");
+        let outside = tempfile::tempdir().unwrap();
+        let png = outside.path().join("x.png");
+        std::fs::write(&png, b"\x89PNG").unwrap();
+        assert!(ingest_blocking(&root, &db, png.to_str().unwrap()).is_err(), "unknown ext rejected");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn strip_verbatim_handles_drive_and_unc() {
+        // \\?\C:\… → C:\…  and  \\?\UNC\server\share\… → \\server\share\… (the reported form)
+        assert_eq!(strip_verbatim(PathBuf::from(r"\\?\C:\Users\x")), PathBuf::from(r"C:\Users\x"));
+        assert_eq!(
+            strip_verbatim(PathBuf::from(r"\\?\UNC\server\share\v")),
+            PathBuf::from(r"\\server\share\v")
+        );
+        assert_eq!(strip_verbatim(PathBuf::from(r"C:\plain")), PathBuf::from(r"C:\plain"));
+    }
+
+    #[test]
+    fn canonical_root_strips_verbatim_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = canonical_root(dir.path());
+        // A `\\?\` verbatim prefix would break the lexical scope/skip compares against
+        // the un-prefixed paths the dialog + CC report.
+        assert!(
+            !r.to_string_lossy().starts_with(r"\\?\"),
+            "canonical root must not carry the Windows verbatim prefix: {}",
+            r.display()
+        );
+        assert!(r.is_dir());
     }
 }

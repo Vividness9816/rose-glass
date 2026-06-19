@@ -46,6 +46,8 @@ pub fn run() {
             commands::recompute_clusters,
             commands::related_notes,
             commands::semantic_search,
+            commands::retry_embedding_model,
+            commands::ingest_dropped_file,
             commands::activity_start,
             commands::activity_stop,
             commands::activity_hook_plan,
@@ -55,6 +57,7 @@ pub fn run() {
             terminal::pty_write,
             terminal::pty_resize,
             terminal::pty_kill,
+            terminal::pty_attach,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
