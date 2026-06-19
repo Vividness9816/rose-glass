@@ -39,6 +39,10 @@ export function stepSimulation(
   const fixed = cfg.mode === 'fixed';
   const drift = fixed ? 0 : cfg.drift;
   const damping = fixed ? 0.6 : cfg.damping;
+  // v2.2 "solar system" hold: a gentle centripetal pull toward the live centre. Off in
+  // fixed mode (that's the settle-in-place equilibrium); in free mode it anchors the whole
+  // system around a fixed point so it stops drifting, while drift/cohesion keep it alive.
+  const centerPull = fixed ? 0 : cfg.centerPull;
   nodes.forEach((n) => {
     // Continuous organic drift: each node wanders on its OWN seeded phase, so the whole
     // graph keeps gently flowing instead of settling into a frozen equilibrium. Two
@@ -57,6 +61,11 @@ export function stepSimulation(
       const avgy = mates.reduce((s, m) => s + m.y, 0) / mates.length;
       n.vx += (avgx - n.x) * cfg.gravity;
       n.vy += (avgy - n.y) * cfg.gravity;
+    }
+    // v2.2 centripetal hold toward the live centre (resize-safe) — the "solar system" anchor
+    if (centerPull) {
+      n.vx += (W / 2 - n.x) * centerPull;
+      n.vy += (H / 2 - n.y) * centerPull;
     }
     // collision / repulsion (the "node strength" dial)
     nodes.forEach((m) => {

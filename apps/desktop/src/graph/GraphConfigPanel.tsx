@@ -23,12 +23,13 @@ function SlidersIcon() {
   );
 }
 
-type SliderKey = 'gravity' | 'repulsion' | 'drift' | 'damping';
+type SliderKey = 'gravity' | 'repulsion' | 'drift' | 'damping' | 'centerPull';
 const SLIDERS: { key: SliderKey; label: string; min: number; max: number; step: number; hint: string }[] = [
   { key: 'gravity', label: 'gravity', min: 0, max: 0.02, step: 0.001, hint: 'pull toward cluster centre' },
   { key: 'repulsion', label: 'strength', min: 0, max: 0.4, step: 0.01, hint: 'how hard nodes push apart' },
   { key: 'drift', label: 'movement', min: 0, max: 0.2, step: 0.005, hint: 'idle wander amplitude' },
   { key: 'damping', label: 'liveliness', min: 0.5, max: 0.97, step: 0.01, hint: 'higher = looser, lower settles faster' },
+  { key: 'centerPull', label: 'center hold', min: 0, max: 0.006, step: 0.0002, hint: 'orbit a fixed centre (0 = free drift)' },
 ];
 
 /** Resolve the theme's current --cluster-N to a #rrggbb so the swatch shows the live
@@ -108,7 +109,7 @@ export function GraphConfigPanel({
             max={s.max}
             step={s.step}
             value={config[s.key]}
-            disabled={s.key === 'drift' && config.mode === 'fixed'}
+            disabled={(s.key === 'drift' || s.key === 'centerPull') && config.mode === 'fixed'}
             onChange={(e) => set(s.key, Number(e.target.value))}
           />
         </label>
