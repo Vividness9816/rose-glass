@@ -47,6 +47,25 @@ pre-existing) · `vite build` 0.
 - **Branding**: app icon → rose-bouquet via `tauri icon` (full PNG/ICO/ICNS + Windows Store set,
   `392548b`).
 
+**v2.3** (PR #3, merge `4487364`, 26 commits; tagged `v2.3` @ `0.3.0`, bump `02ce2bc`; signed
+0.3.0 NSIS+MSI). Gates green: `tsc` 0 · `vitest` 119/119 · `cargo` 75/75 · `vite build` 0. Built
+brainstorm→spec→plan→build per leg; leg 4 via `/council` (**ADR-20260619-rose-glass-v2.3-tabs-architecture**).
+- **Leg 1 — settings:** categorized menu (General/Editor/Behavior/Advanced) + `SettingsContext`;
+  live CodeMirror compartments for spellcheck, auto-pair brackets, auto-pair Markdown, smart lists,
+  indent tabs/spaces, **vim** (`@replit/codemirror-vim`), **HTML→MD paste** (`turndown`, Ctrl/Cmd+Shift+V=raw).
+- **Leg 2 — graph:** hover→highlight node+1-hop neighbors + dim rest; **labels on hover** (forgiving
+  22px hit radius, headless-verified); removed the All/Focus toggle. **Ghost nodes tried + reverted**
+  (≈1100 vs ≈130 on a real vault — too noisy; `1bb453f`). GPU/2D choice now **persists** (`d63d804`).
+- **Leg 3 — reading mode:** Edit/Read toggle (book icon) + read-only rendered Markdown (`markdown-it`
+  + DOMPurify, lazy-split, clickable wikilinks); the "Default view" setting drives it.
+- **Leg 4 — tabs (ADR-20260619):** multi-document tab bar; the single editable buffer + path-keyed
+  save machinery stay UNCHANGED; pure tested `shell/tabs.ts` owns the list transitions (dedup-by-path,
+  neighbor-on-close, focus policy); per-tab edit/read mode. R2 (close-flush) automatic via openNote;
+  R3 (awaitable flush) done; R1 (shutdown flush) deferred (pre-existing gap).
+- **Leg 5 — general:** version + Check-for-Updates (opens GitHub releases); in-app **Help** overlay
+  rendering a guide through the reading view (deviation from a bundled help.pdf — PdfView is
+  vault-relative only).
+
 ## Phase 12 — §20 acceptance gate PASSED → v1.0 (2026-06-18)
 **All 11 §20 rows ✅ proven.** A3/A4/A7/A9/A10 were headless/test-proven earlier; the 6
 live-window rows (A1/A2/A5/A6/A8/A11) are now confirmed by the **user's live walkthrough**

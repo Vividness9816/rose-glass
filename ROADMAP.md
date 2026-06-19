@@ -36,6 +36,11 @@ with a riskiest-premise spike on a tiny scope before its build.
   resizable panels. v2.2: graph solar-system center-hold, lazy TerminalPane, `React.memo(GraphPane)`,
   container queries, curated in-repo `<Icon>` set, single-instance file-open forwarding. Branding:
   rose-bouquet app icon. Gates green (tsc 0 · vitest 95/95 · cargo 75/75 · clippy clean · vite build 0).
+- **v2.3** (PR #3, merge `4487364`, 26 commits; tagged `v2.3` @ `0.3.0`) — see STATUS.md "v2.3".
+  Obsidian-feel graph (hover highlight + labels, removed Focus toggle, ghost nodes reverted, GPU
+  persists), categorized settings menu (vim/spellcheck/auto-pair/smart-lists/HTML→MD paste), reading
+  mode (markdown-it), multi-document **tabs** (ADR-20260619 — single buffer unchanged + pure tabs.ts),
+  General version/Check-for-Updates + in-app Help. Gates green (tsc 0 · vitest 119 · cargo 75 · build 0).
 
 ## Active frontier (historical — pre-v1.0 round-2 feedback, 2026-06-17 PM)
 ~~Primary: GPU shader parity~~ ✅ **DONE** (Phase 4 row above — GPU-visual parity + Focus + inversion,
