@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { readFileBytes } from '../ipc';
+import { Icon } from '../icons/Icon';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -76,7 +77,9 @@ export function PdfView({ path }: { path: string }) {
   return (
     <div className="binary-view pdf-view">
       <div className="bv-bar">
-        <span className="bv-icon">▤</span>
+        <span className="bv-icon">
+          <Icon name="file" size="md" />
+        </span>
         <span className="bv-name">{name}</span>
         <span className="bv-tag">PDF · view-only</span>
       </div>

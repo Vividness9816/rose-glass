@@ -3,7 +3,7 @@
    Rust save path; the watcher reindexes and index events refresh backlinks/meta
    (with an anti-clobber guard so a user's in-progress buffer is never stomped). */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { getStoredTheme, toggleTheme, type Theme } from '../appearance/theme';
 import type { GraphData } from '../graph/types';
 import { payloadToGraphData } from '../graph/fromPayload';
@@ -20,7 +20,14 @@ import { editorKind } from '../editor/editorKind';
 import { siblingMdPath, toVaultRelative } from '../editor/fileOpen';
 import { GraphPane } from '../graph/GraphPane';
 import { Backdrop } from '../backdrop/Backdrop';
-import { TerminalPane } from '../terminal/TerminalPane';
+// v2.2: lazy so xterm (eager, heavy) leaves the boot chunk; the terminal is hidden until
+// Ctrl+` and only mounted when terminals.length > 0, so this loads on first open — no FMP cost.
+const TerminalPane = lazy(() =>
+  import('../terminal/TerminalPane').then((m) => ({ default: m.TerminalPane })),
+);
+import { isUnattended } from '../terminal/attention';
+import { Splitter } from './Splitter';
+import { clampFraction, clampPx, nextFraction, TERM_H_DEFAULT, TERM_H_MIN } from './splitLogic';
 import { CommandPalette } from '../command/CommandPalette';
 import { ActivityPane } from '../activity/ActivityPane';
 import {
@@ -32,6 +39,7 @@ import {
 } from '../activity/ring';
 import { Titlebar } from './Titlebar';
 import { IconRail } from './IconRail';
+import { Icon } from '../icons/Icon';
 import { EditorPane } from './EditorPane';
 import { StatusBar } from './StatusBar';
 import { NotesPane } from './NotesPane';
@@ -44,6 +52,8 @@ import {
   getBacklinks,
   getGraphPayload,
   ingestDroppedFile,
+  onOpenFile as onOsOpenFile,
+  takePendingOpenFile,
   getNote,
   inTauri,
   onActivityAnomaly,
@@ -87,12 +97,36 @@ export function Shell() {
   const nextTermIdRef = useRef(1);
   const activeTermRef = useRef(activeTerm);
   activeTermRef.current = activeTerm;
+  const terminalOpenRef = useRef(terminalOpen); // drawer-visible, read inside the mount-once attention path
+  terminalOpenRef.current = terminalOpen;
   const [clustering, setClustering] = useState(false); // Phase 11 embed+cluster in progress
   const [clusterError, setClusterError] = useState<string | null>(null); // v2.0 model-load failure → Retry
   const [reindexing, setReindexing] = useState(false); // Settings: manual index rebuild in progress
   const [railView, setRailView] = useState('graph'); // which IconRail view; 'activity' swaps the right pane
   const [activity, setActivity] = useState<ActivityState>(emptyActivity); // Phase 8 ephemeral ring
   const [tailing, setTailing] = useState(false); // is the CC activity tail actually running
+
+  // ── v2.1 resizable layout: graph↔right split fraction + terminal-drawer height. Both
+  // restore from session and are CLAMPED on read (splitLogic) so a corrupt persisted value
+  // degrades to a default instead of bricking the layout. Drag drives the CSS var
+  // imperatively; commit persists once on pointer-up.
+  const [splitFraction, setSplitFraction] = useState(() => clampFraction(loadSession().splitFraction ?? 0.5));
+  const [terminalHeight, setTerminalHeight] = useState(() =>
+    clampPx(loadSession().terminalHeight ?? TERM_H_DEFAULT, TERM_H_DEFAULT, TERM_H_MIN, window.innerHeight - 160),
+  );
+  const mainAreaRef = useRef<HTMLDivElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const onCommitSplit = useCallback((f: number) => {
+    setSplitFraction(f);
+    saveSession({ splitFraction: f });
+  }, []);
+  const onCommitTermHeight = useCallback((h: number) => {
+    setTerminalHeight(h);
+    saveSession({ terminalHeight: h });
+  }, []);
+  // Clamp the APPLIED drawer height to the current viewport, so a tall saved value (or a
+  // window shrunk since it was saved) can't push the resize edge off-screen and soft-lock it.
+  const drawerHeightPx = clampPx(terminalHeight, terminalHeight, TERM_H_MIN, window.innerHeight - 160);
 
   // Phase 8: Shell calls this to light up a node on CC activity; GraphPane fills it
   // with a closure over the live renderer (survives data-driven renderer rebuilds).
@@ -170,10 +204,22 @@ export function Shell() {
       return n;
     });
   }, []);
-  // A background tab's PTY rang the bell (e.g. Claude Code awaiting input) → flag it green.
+  // A terminal's PTY emitted settled output or rang the bell. Flag it green ONLY if you
+  // can't see it right now (isUnattended: not the active tab, or drawer hidden, or window
+  // blurred) — the old code flagged background tabs only, so a single focused terminal
+  // awaiting a blurred-window Claude run never lit up (the bug the user reported).
   const markTermAttention = useCallback((id: number) => {
-    if (id === activeTermRef.current) return; // already focused — nothing to flag
-    setTermAttention((s) => (s.has(id) ? s : new Set(s).add(id)));
+    const attended = !isUnattended({
+      isActiveTab: id === activeTermRef.current,
+      isDrawerVisible: terminalOpenRef.current,
+      isWindowFocused: document.hasFocus(),
+    });
+    if (attended) return; // you're looking at it — nothing to flag
+    setTermAttention((s) => {
+      if (s.has(id)) return s;
+      console.debug(`terminal ${id} → attention (unattended, output settled/bell)`);
+      return new Set(s).add(id);
+    });
   }, []);
   const commitTermRename = useCallback((id: number, value: string) => {
     const name = value.trim();
@@ -251,6 +297,26 @@ export function Shell() {
     return () => window.removeEventListener('keydown', onKey);
   }, [openPalette, toggleTerminal]);
 
+  // Clear the active terminal's attention the moment you're looking at it again: when it
+  // becomes the active tab, when the drawer opens, or when the window regains focus. The old
+  // clear path (selectTerm only) missed the single-terminal / window-blur case.
+  useEffect(() => {
+    if (!terminalOpen) return;
+    const clearActive = () => {
+      if (!document.hasFocus()) return;
+      setTermAttention((s) => {
+        const id = activeTermRef.current;
+        if (!s.has(id)) return s;
+        const n = new Set(s);
+        n.delete(id);
+        return n;
+      });
+    };
+    clearActive(); // active-tab change or drawer just opened → clear now
+    window.addEventListener('focus', clearActive); // window refocus → clear then
+    return () => window.removeEventListener('focus', clearActive);
+  }, [activeTerm, terminalOpen]);
+
   const refreshGraph = useCallback(async (): Promise<GraphPayload | null> => {
     try {
       const payload = await getGraphPayload();
@@ -299,6 +365,16 @@ export function Shell() {
       setRailView('graph'); // surface the editor pane (not the activity pane)
     },
     [saver],
+  );
+
+  // v2.2: stable callback for a graph node click, so React.memo(GraphPane) isn't defeated by
+  // a fresh inline arrow each render (the only GraphPane prop that wasn't already stable).
+  const onOpenGraphNode = useCallback(
+    (p: string) => {
+      setRailView('graph'); // surface the editor for the clicked note
+      void openNote(p);
+    },
+    [openNote],
   );
 
   // Phase 9: "Open file…" — pick any file via the dialog and route by extension. The file
@@ -413,6 +489,27 @@ export function Shell() {
       console.error('open vault failed:', e);
     }
   }, [openVaultByPath]);
+
+  // v2.2: open a file handed to us by the OS (double-click / "open with"), arriving via the
+  // single-instance forward (warm) or the cold-start pending file. If a vault is open, ingest
+  // into it (copies outside-vault files into inbox/, exactly like drag-drop); if none is open
+  // yet, open the file's own folder AS the vault so it gets indexed + opened in place.
+  const openExternalFile = useCallback(
+    async (absPath: string) => {
+      try {
+        if (!vaultRootRef.current) {
+          const cut = Math.max(absPath.lastIndexOf('\\'), absPath.lastIndexOf('/'));
+          if (cut > 0) await openVaultByPath(absPath.slice(0, cut));
+        }
+        const r = await ingestDroppedFile(absPath);
+        if (r.kind === 'note') await openNote(r.rel);
+        else openBinary(r.rel);
+      } catch (e) {
+        console.error('open external file failed for', absPath, e);
+      }
+    },
+    [openVaultByPath, openNote, openBinary],
+  );
 
   // Titlebar "+ New note": create a non-colliding Untitled note at the vault root and open it.
   const onNewNote = useCallback(async () => {
@@ -529,6 +626,21 @@ export function Shell() {
     };
   }, [openNote, openBinary]);
 
+  // v2.2: a file opened from the OS while we're ALREADY running — the single-instance plugin
+  // forwarded it (focus + open-file event). Reuse the same ingest/open path as drag-drop.
+  useEffect(() => {
+    if (!inTauri()) return;
+    let active = true;
+    let un: (() => void) | undefined;
+    onOsOpenFile((path) => void openExternalFile(path))
+      .then((u) => (active ? (un = u) : u()))
+      .catch(() => {});
+    return () => {
+      active = false;
+      un?.();
+    };
+  }, [openExternalFile]);
+
   // Persist the active rail view so the app resumes on the same pane.
   useEffect(() => {
     saveSession({ railView });
@@ -540,7 +652,14 @@ export function Shell() {
     if (!inTauri()) return;
     const s = loadSession();
     if (s.railView) setRailView(s.railView);
-    if (s.vaultPath) void openVaultByPath(s.vaultPath, s.notePath);
+    void (async () => {
+      if (s.vaultPath) await openVaultByPath(s.vaultPath, s.notePath);
+      // Cold start: a file this instance was launched with (double-clicked before running).
+      // Sequenced AFTER restore so there's a vault to ingest into (else openExternalFile opens
+      // the file's own folder as the vault).
+      const pending = await takePendingOpenFile();
+      if (pending) await openExternalFile(pending);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- restore once on mount
   }, []);
 
@@ -597,7 +716,11 @@ export function Shell() {
         active={railView}
         onSelect={(id) => (id === 'search' ? openPalette() : setRailView(id))}
       />
-      <div className="main-area">
+      <div
+        className="main-area"
+        ref={mainAreaRef}
+        style={{ ['--rg-split']: String(splitFraction) } as CSSProperties}
+      >
         <GraphPane
           theme={theme}
           data={graphData}
@@ -608,10 +731,7 @@ export function Shell() {
           clusterError={clusterError}
           onRetryCluster={onRetryCluster}
           pulseRef={graphPulseRef}
-          onOpenNode={(p) => {
-            setRailView('graph'); // surface the editor for the clicked note
-            void openNote(p);
-          }}
+          onOpenNode={onOpenGraphNode}
         />
         {railView === 'activity' ? (
           <ActivityPane state={activity} tailing={tailing} vaultOpen={graphData !== undefined} />
@@ -646,6 +766,15 @@ export function Shell() {
             onEditAsMarkdown={onEditAsMarkdown}
           />
         )}
+        <Splitter
+          axis="x"
+          containerRef={mainAreaRef}
+          varName="--rg-split"
+          compute={(x, rect) => nextFraction(x - rect.left, rect.width)}
+          format={(f) => String(f)}
+          onCommit={onCommitSplit}
+          ariaLabel="Resize graph and editor panes"
+        />
       </div>
       <StatusBar
         notes={counts.notes}
@@ -671,7 +800,22 @@ export function Shell() {
           hides it (display:none). Each tab is a keyed TerminalPane — only the active one
           shows, the rest stay alive hidden. The tab × unmounts → kills that PTY. */}
       {terminals.length > 0 && (
-        <div className="terminal-drawer" style={{ display: terminalOpen ? 'flex' : 'none' }}>
+        <div
+          className="terminal-drawer"
+          ref={drawerRef}
+          style={
+            { display: terminalOpen ? 'flex' : 'none', ['--rg-term-h']: `${drawerHeightPx}px` } as CSSProperties
+          }
+        >
+          <Splitter
+            axis="y"
+            containerRef={drawerRef}
+            varName="--rg-term-h"
+            compute={(y, rect) => clampPx(rect.bottom - y, terminalHeight, TERM_H_MIN, window.innerHeight - 160)}
+            format={(px) => `${px}px`}
+            onCommit={onCommitTermHeight}
+            ariaLabel="Resize terminal height"
+          />
           <div className="terminal-header">
             <div className="terminal-tabs">
               {terminals.map((id, i) => (
@@ -728,7 +872,7 @@ export function Shell() {
                     title="Close terminal (ends its process)"
                     aria-label={`Close terminal ${i + 1}`}
                   >
-                    ×
+                    <Icon name="close" size={13} />
                   </button>
                 </div>
               ))}
@@ -739,7 +883,7 @@ export function Shell() {
                 title="New terminal"
                 aria-label="New terminal"
               >
-                +
+                <Icon name="plus" size={13} />
               </button>
             </div>
             <button
@@ -749,19 +893,21 @@ export function Shell() {
               title="Hide terminal (Ctrl+`) — keeps it running"
               aria-label="Hide terminal"
             >
-              ▾
+              <Icon name="chevronDown" size={13} />
             </button>
           </div>
           <div className="terminal-body">
-            {terminals.map((id) => (
-              <div
-                key={id}
-                className="terminal-tabpane"
-                style={{ display: id === activeTerm ? 'flex' : 'none' }}
-              >
-                <TerminalPane theme={theme} onAttention={() => markTermAttention(id)} />
-              </div>
-            ))}
+            <Suspense fallback={null}>
+              {terminals.map((id) => (
+                <div
+                  key={id}
+                  className="terminal-tabpane"
+                  style={{ display: id === activeTerm ? 'flex' : 'none' }}
+                >
+                  <TerminalPane theme={theme} onAttention={() => markTermAttention(id)} />
+                </div>
+              ))}
+            </Suspense>
           </div>
         </div>
       )}

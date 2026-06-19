@@ -59,6 +59,12 @@
         "name": "PDF",
         "description": "PDF document",
         "role": "Viewer"
+      },
+      {
+        "ext": ["docx"],
+        "name": "Word Document",
+        "description": "Word document",
+        "role": "Viewer"
       }
     ]
   }

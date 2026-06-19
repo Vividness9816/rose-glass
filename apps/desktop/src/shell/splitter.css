@@ -1,0 +1,70 @@
+/* Resize seams. The element itself is a wide (7px) invisible grab zone centred on the
+   boundary — a 1px hit target is unusable; the VISIBLE seam is the ::after hairline. At rest
+   it's a faint border line; on hover/drag it lights rose and widens to 2px — a refracted
+   seam that matches the glass chrome, not a chrome gutter. */
+.splitter {
+  position: absolute;
+  z-index: 4;
+  touch-action: none; /* pointer events own the drag; don't scroll/zoom */
+}
+.splitter::after {
+  content: '';
+  position: absolute;
+  transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease),
+    width var(--dur-fast) var(--ease), height var(--dur-fast) var(--ease);
+}
+.splitter:hover::after,
+.splitter:active::after {
+  background: var(--rose-bright);
+  box-shadow: 0 0 8px var(--rose-glow);
+}
+
+/* Vertical bar (graph↔right): drag left/right. Tracks the boundary via the same --rg-split. */
+.splitter-x {
+  top: 0;
+  bottom: 0;
+  left: calc(var(--rg-split, 0.5) * 100%);
+  width: 7px;
+  transform: translateX(-50%);
+  cursor: col-resize;
+}
+.splitter-x::after {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--border); /* resting hairline — there's no existing seam here */
+}
+.splitter-x:active::after {
+  width: 2px;
+}
+
+/* Horizontal bar (terminal-drawer top edge): drag up/down. The drawer already draws its own
+   border-top, so the resting seam stays transparent (no double line) and only lights on hover. */
+.splitter-y {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 7px;
+  transform: translateY(-50%);
+  cursor: row-resize;
+  z-index: 6;
+}
+.splitter-y::after {
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  transform: translateY(-50%);
+  background: transparent;
+}
+.splitter-y:active::after {
+  height: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splitter::after {
+    transition: none;
+  }
+}

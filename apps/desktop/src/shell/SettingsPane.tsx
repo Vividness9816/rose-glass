@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { activityHookArm, activityHookDisarm, activityHookPlan, inTauri } from '../ipc';
 import type { Theme } from '../appearance/theme';
+import { Icon } from '../icons/Icon';
 import './panes.css';
 
 export function SettingsPane({
@@ -43,7 +44,9 @@ export function SettingsPane({
   return (
     <div className="side-pane">
       <div className="sp-header">
-        <span className="sp-glyph">⚙</span>
+        <span className="sp-glyph">
+          <Icon name="settings" size="sm" />
+        </span>
         <span className="sp-title">settings</span>
       </div>
       <div className="sp-body">

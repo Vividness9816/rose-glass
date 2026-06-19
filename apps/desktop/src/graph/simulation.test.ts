@@ -26,6 +26,21 @@ describe('stepSimulation honors GraphConfig', () => {
     expect(dFree).toBeGreaterThan(dFixed);
   });
 
+  it('centerPull holds an off-centre node near the centre while drift keeps it moving (hold, not freeze)', () => {
+    // centre of an 800x600 field is (400,300); start far out at (740,80).
+    const held = [node(0, 740, 80)];
+    run(held, 240, { ...DEFAULT_CONFIG, centerPull: 0.003 });
+    const dHeld = Math.hypot(held[0].x - 400, held[0].y - 300);
+
+    const loose = [node(0, 740, 80)];
+    run(loose, 240, { ...DEFAULT_CONFIG, centerPull: 0 });
+    const dLoose = Math.hypot(loose[0].x - 400, loose[0].y - 300);
+
+    expect(dHeld).toBeLessThan(dLoose); // the pull brings it back toward centre
+    expect(dHeld).toBeLessThan(200); // and holds it reasonably near
+    expect(Math.hypot(held[0].vx, held[0].vy)).toBeGreaterThan(0); // still moving — not frozen
+  });
+
   it('repulsion 0 leaves overlapping nodes overlapping; nonzero pushes them apart', () => {
     const sep = (repulsion: number) => {
       const ns = [node(0, 400, 300), node(1, 402, 300)];

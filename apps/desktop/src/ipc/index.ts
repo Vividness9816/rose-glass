@@ -130,6 +130,14 @@ export const onIndexNote = (
 ): Promise<UnlistenFn> =>
   listen<{ path: string; op: 'upsert' | 'delete' }>('index:note', (e) => cb(e.payload));
 
+/** v2.2: a file opened from the OS (double-click / "open with") forwarded by the
+ *  single-instance plugin to the already-running app as an absolute path (warm path). */
+export const onOpenFile = (cb: (path: string) => void): Promise<UnlistenFn> =>
+  listen<string>('open-file', (e) => cb(e.payload));
+
+/** v2.2: cold start — take + clear the file this instance was launched with (or null). */
+export const takePendingOpenFile = () => invoke<string | null>('take_pending_open_file');
+
 export const onIndexRebuilt = (cb: (e: { note_count: number }) => void): Promise<UnlistenFn> =>
   listen<{ note_count: number }>('index:rebuilt', (e) => cb(e.payload));
 

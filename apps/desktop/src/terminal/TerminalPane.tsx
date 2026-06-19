@@ -4,7 +4,7 @@
    vault server-side (backend reads AppState.vault_root), so we pass cwd=null.
    Colors/font are read from the token layer (no hardcoded values — A10/§16). */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
@@ -20,6 +20,7 @@ import {
   ptySpawn,
   ptyWrite,
 } from '../ipc';
+import { decideContextMenu, decideKey, stripTrailingNewline } from './clipboard';
 import './terminal.css';
 
 function token(name: string): string {
@@ -40,6 +41,7 @@ function xtermTheme() {
 export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention?: () => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  const [copied, setCopied] = useState(false); // brief "copied" flash (copy is otherwise invisible)
   // Latest callback without re-running the (mount-once) PTY effect.
   const onAttentionRef = useRef(onAttention);
   onAttentionRef.current = onAttention;
@@ -70,6 +72,7 @@ export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention
     let unOut: UnlistenFn | undefined;
     let unExit: UnlistenFn | undefined;
     let disposed = false;
+    let settleTimer: number | undefined;
 
     // Never write to a disposed terminal (an output chunk can land mid-teardown).
     const writeSafe = (data: string | Uint8Array) => {
@@ -81,6 +84,16 @@ export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention
       }
     };
 
+    // Attention (v2.1): write the chunk, then (re)arm a settle timer. When output stops for
+    // ~400ms the command has likely finished / is waiting → signal the Shell, which flags
+    // the tab ONLY if it's unattended. A continuous stream keeps re-arming and never
+    // settles, so a long build won't scream; it flags once, when it goes quiet.
+    const onOutput = (data: string | Uint8Array) => {
+      writeSafe(data);
+      if (settleTimer !== undefined) clearTimeout(settleTimer);
+      settleTimer = window.setTimeout(() => onAttentionRef.current?.(), 400);
+    };
+
     void (async () => {
       try {
         id = await ptySpawn(null, term.cols, term.rows); // cwd=null → backend uses the vault root
@@ -90,7 +103,7 @@ export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention
           void ptyKill(id);
           return;
         }
-        unOut = await onPtyOutput(id, writeSafe);
+        unOut = await onPtyOutput(id, onOutput);
         if (disposed) {
           unOut();
           return;
@@ -114,10 +127,74 @@ export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention
       }
     })();
 
+    // ── Clipboard shortcuts (PowerShell-style). Right-click = copy-if-selection-else-paste;
+    // Ctrl+C copies ONLY with a live selection (else it passes through as \x03 SIGINT);
+    // Ctrl+V / Ctrl+Shift+C / Ctrl+Shift+V. The copy/SIGINT branching is unit-tested in
+    // clipboard.ts; here we only do the IO. Paste routes through term.paste so PowerShell's
+    // bracketed paste wraps it (no auto-run) and a trailing newline is stripped as a floor.
+    const flashCopied = () => {
+      if (disposed) return;
+      setCopied(true);
+      window.setTimeout(() => {
+        if (!disposed) setCopied(false);
+      }, 900);
+    };
+    const doCopy = () => {
+      const sel = term.getSelection();
+      if (!sel) return;
+      void (async () => {
+        try {
+          const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
+          await writeText(sel);
+          term.clearSelection(); // so a following bare Ctrl+C is the interrupt again
+          flashCopied();
+        } catch (e) {
+          console.debug('terminal copy failed:', e);
+        }
+      })();
+    };
+    const doPaste = () => {
+      void (async () => {
+        try {
+          const { readText } = await import('@tauri-apps/plugin-clipboard-manager');
+          const text = await readText();
+          if (text) term.paste(stripTrailingNewline(text));
+        } catch (e) {
+          console.debug('terminal paste failed:', e);
+        }
+      })();
+    };
+    term.attachCustomKeyEventHandler((e) => {
+      const action = decideKey(e, term.hasSelection());
+      if (action === 'copy') {
+        e.preventDefault();
+        doCopy();
+        return false;
+      }
+      if (action === 'paste') {
+        e.preventDefault();
+        doPaste();
+        return false;
+      }
+      return true; // passthrough: xterm sends the bytes (bare Ctrl+C → \x03 SIGINT)
+    });
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      if (decideContextMenu(term.hasSelection()) === 'copy') doCopy();
+      else doPaste();
+    };
+    host.addEventListener('contextmenu', onContextMenu);
+
+    let resizeRaf: number | undefined;
     const ro = new ResizeObserver(() => {
       try {
-        fit.fit();
-        if (id >= 0) void ptyResize(id, term.cols, term.rows);
+        fit.fit(); // cheap + synchronous — refit every frame is fine
+        // Coalesce the PTY resize (an IPC round-trip into ConPTY master.resize()) to one per
+        // frame so a splitter / window-edge drag storm can't garble ConPTY reflow.
+        if (resizeRaf !== undefined) cancelAnimationFrame(resizeRaf);
+        resizeRaf = requestAnimationFrame(() => {
+          if (!disposed && id >= 0) void ptyResize(id, term.cols, term.rows);
+        });
       } catch {
         /* host detached mid-resize */
       }
@@ -127,7 +204,10 @@ export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention
 
     return () => {
       disposed = true;
+      if (settleTimer !== undefined) clearTimeout(settleTimer);
+      if (resizeRaf !== undefined) cancelAnimationFrame(resizeRaf);
       ro.disconnect();
+      host.removeEventListener('contextmenu', onContextMenu);
       unOut?.();
       unExit?.();
       if (id >= 0) void ptyKill(id);
@@ -144,5 +224,12 @@ export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention
   if (!inTauri()) {
     return <div className="terminal-host terminal-placeholder">Terminal runs in the desktop app.</div>;
   }
-  return <div className="terminal-host" ref={hostRef} />;
+  return (
+    <div className="terminal-host-wrap">
+      <div className="terminal-host" ref={hostRef} />
+      <span className={`terminal-copied${copied ? ' show' : ''}`} aria-hidden="true">
+        copied
+      </span>
+    </div>
+  );
 }

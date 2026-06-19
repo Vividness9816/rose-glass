@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { memo, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import type { Theme } from '../appearance/theme';
 import type { GraphData } from './types';
 import { buildMockGraph } from './mockGraph';
@@ -9,11 +9,12 @@ import { GraphRenderer } from './GraphRenderer';
 import type { GraphRendererLike } from './Renderer';
 import { WebGpuGraphRenderer } from './webgpu/WebGpuGraphRenderer';
 import { probeWebGpu } from './webgpu/probe';
+import { Icon } from '../icons/Icon';
 import './graph.css';
 
 /** Graph pane: mockup chrome + the live canvas-2D graph. Uses `data` (from the
  *  indexer) when given, else mock data. Rebuilds the renderer when `data` changes. */
-export function GraphPane({
+function GraphPaneInner({
   theme,
   data,
   onOpenVault,
@@ -261,7 +262,9 @@ export function GraphPane({
   return (
     <div className="graph-pane">
       <div className="graph-header">
-        <span className="graph-glyph">⬡</span>
+        <span className="graph-glyph">
+          <Icon name="graph" size="sm" />
+        </span>
         <span className="graph-title">knowledge graph</span>
         <div className="graph-controls">
           {onOpenVault && (
@@ -305,7 +308,7 @@ export function GraphPane({
               title={`Embedding model failed to load: ${clusterError}`}
               style={{ color: 'var(--rose, #e0607e)' }}
             >
-              ⚠ Retry
+              <Icon name="warning" size={12} /> Retry
             </button>
           )}
           <button
@@ -332,3 +335,9 @@ export function GraphPane({
     </div>
   );
 }
+
+/* v2.2 — memoized so a Shell re-render (e.g. the per-CC-event setActivity tick) doesn't
+   re-enter GraphPane's render body. Effective ONLY because every prop Shell passes is
+   referentially stable: data identity is stable between graph refreshes, the callbacks are
+   useCallback (incl. onOpenNode as of v2.2), pulseRef is a ref, the rest are primitives. */
+export const GraphPane = memo(GraphPaneInner);

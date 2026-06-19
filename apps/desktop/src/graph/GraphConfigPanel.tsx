@@ -4,31 +4,15 @@
 
 import { useState } from 'react';
 import { DEFAULT_CONFIG, type GraphConfig } from './config';
+import { Icon } from '../icons/Icon';
 
-/** Monochrome sliders glyph (inherits currentColor — themeable, never an emoji). Says
-    "tune" more honestly than a gear, since the panel IS sliders. */
-function SlidersIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-      <line x1="21" y1="5" x2="13" y2="5" />
-      <line x1="9" y1="5" x2="3" y2="5" />
-      <line x1="13" y1="3" x2="13" y2="7" />
-      <line x1="21" y1="12" x2="15" y2="12" />
-      <line x1="11" y1="12" x2="3" y2="12" />
-      <line x1="15" y1="10" x2="15" y2="14" />
-      <line x1="21" y1="19" x2="11" y2="19" />
-      <line x1="7" y1="19" x2="3" y2="19" />
-      <line x1="11" y1="17" x2="11" y2="21" />
-    </svg>
-  );
-}
-
-type SliderKey = 'gravity' | 'repulsion' | 'drift' | 'damping';
+type SliderKey = 'gravity' | 'repulsion' | 'drift' | 'damping' | 'centerPull';
 const SLIDERS: { key: SliderKey; label: string; min: number; max: number; step: number; hint: string }[] = [
   { key: 'gravity', label: 'gravity', min: 0, max: 0.02, step: 0.001, hint: 'pull toward cluster centre' },
   { key: 'repulsion', label: 'strength', min: 0, max: 0.4, step: 0.01, hint: 'how hard nodes push apart' },
   { key: 'drift', label: 'movement', min: 0, max: 0.2, step: 0.005, hint: 'idle wander amplitude' },
   { key: 'damping', label: 'liveliness', min: 0.5, max: 0.97, step: 0.01, hint: 'higher = looser, lower settles faster' },
+  { key: 'centerPull', label: 'center hold', min: 0, max: 0.006, step: 0.0002, hint: 'orbit a fixed centre (0 = free drift)' },
 ];
 
 /** Resolve the theme's current --cluster-N to a #rrggbb so the swatch shows the live
@@ -70,7 +54,7 @@ export function GraphConfigPanel({
         title="Graph settings"
         aria-label="Graph settings"
       >
-        <SlidersIcon />
+        <Icon name="sliders" size={13} />
       </button>
     );
   }
@@ -80,7 +64,7 @@ export function GraphConfigPanel({
       <div className="gcfg-head">
         <span>graph physics</span>
         <button className="gcfg-x" type="button" onClick={() => setOpen(false)} aria-label="Close settings">
-          ×
+          <Icon name="close" size={13} />
         </button>
       </div>
 
@@ -108,7 +92,7 @@ export function GraphConfigPanel({
             max={s.max}
             step={s.step}
             value={config[s.key]}
-            disabled={s.key === 'drift' && config.mode === 'fixed'}
+            disabled={(s.key === 'drift' || s.key === 'centerPull') && config.mode === 'fixed'}
             onChange={(e) => set(s.key, Number(e.target.value))}
           />
         </label>

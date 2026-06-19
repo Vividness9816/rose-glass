@@ -5,7 +5,9 @@
   left: 52px; /* clear the icon rail */
   right: 0;
   bottom: 28px; /* clear the statusbar */
-  height: 300px;
+  /* --rg-term-h set inline by the Shell (persisted/clamped) + driven imperatively while
+     dragging the .splitter-y top edge. */
+  height: var(--rg-term-h, 300px);
   display: flex;
   flex-direction: column;
   background: var(--glass-bg);
@@ -30,19 +32,38 @@
   border-radius: 50%;
   background: var(--rose);
   box-shadow: 0 0 6px var(--rose);
+  /* The circle→square morph IS the state change (animatable border-radius). */
+  transition: border-radius var(--dur-norm) var(--ease-out), background var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
 }
-/* Attention: a background tab whose PTY rang the bell (e.g. Claude Code awaiting input).
-   Higher-specificity selector beats the active/idle opacity rules below; ponytail: literal
-   emerald — a one-off liveness dot, not a themed surface (A10 governs graph/app tokens). */
-.terminal-tab .terminal-dot.attn {
+/* Attention: the PTY emitted output (or rang the bell) while you weren't watching this
+   terminal. Rose circle → emerald SQUARE: the shape change is a non-colour channel, so the
+   state still reads for red/green colour-blindness. The active-tab variant is listed too —
+   a focused tab can be flagged when the WINDOW is blurred — so .attn beats the .active dot
+   rule below regardless of source order. ponytail: literal emerald, a one-off liveness dot
+   (A10 governs themed surfaces, not this). */
+.terminal-tab .terminal-dot.attn,
+.terminal-tab.active .terminal-dot.attn {
   background: #34d399;
   box-shadow: 0 0 6px #34d399;
   opacity: 1;
-  animation: term-attn-pulse 1.2s ease-in-out infinite;
+  border-radius: 2px;
+  animation: term-attn-pulse 1.2s ease-in-out infinite, term-attn-pop var(--dur-norm) var(--ease-out);
 }
 @keyframes term-attn-pulse {
   0%, 100% { box-shadow: 0 0 4px #34d399; }
   50% { box-shadow: 0 0 9px #34d399; }
+}
+@keyframes term-attn-pop {
+  from { transform: scale(0.7); }
+  to { transform: scale(1); }
+}
+/* Reduced motion: drop the morph/pulse but keep the static emerald square — never gate the
+   state's legibility on animation. */
+@media (prefers-reduced-motion: reduce) {
+  .terminal-dot { transition: none; }
+  .terminal-tab .terminal-dot.attn,
+  .terminal-tab.active .terminal-dot.attn { animation: none; }
 }
 .terminal-tab-rename {
   background: var(--surface-1);
@@ -156,6 +177,15 @@
   flex-direction: column; /* active pane is inline display:flex → the host's flex:1 fills it */
 }
 
+/* Wraps the xterm host so the transient "copied" pill can be an absolutely-positioned
+   sibling (xterm owns the host's own children, so the pill can't live inside it). */
+.terminal-host-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 .terminal-host {
   flex: 1;
   min-height: 0;
@@ -169,6 +199,34 @@
   color: var(--text-3);
   font-size: 12px;
   font-family: var(--font-mono);
+}
+
+/* Transient copy confirmation — copy leaves no visible trace, so a quick pill confirms it.
+   Bottom-right of the terminal body, fades out fast; reduced-motion shows/hides instantly. */
+.terminal-copied {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border-mid);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-norm) var(--ease-out);
+  z-index: 6;
+}
+.terminal-copied.show {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .terminal-copied {
+    transition: none;
+  }
 }
 
 /* xterm paints its own background; let the glass drawer show by keeping the viewport clear */

@@ -8,6 +8,7 @@
    ever reaches innerHTML — defense-in-depth on top of mammoth's already-constrained output. */
 
 import { type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from 'react';
+import { Icon } from '../icons/Icon';
 import mammoth from 'mammoth';
 import DOMPurify from 'dompurify';
 import { readFileBytes } from '../ipc';
@@ -118,7 +119,9 @@ export function DocxView({ path, onEditAsMarkdown }: Props) {
   return (
     <div className="binary-view docx-view">
       <div className="bv-bar">
-        <span className="bv-icon">◫</span>
+        <span className="bv-icon">
+          <Icon name="file" size="md" />
+        </span>
         <span className="bv-name">{name}</span>
         <span className="bv-tag">Word · read-only</span>
         <button

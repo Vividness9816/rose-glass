@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { search, type SearchHit } from '../ipc';
 import { clampIndex } from './logic';
+import { Icon } from '../icons/Icon';
 import './palette.css';
 
 interface Props {
@@ -94,7 +95,9 @@ export function CommandPalette({ onClose, onOpenNote, initialQuery }: Props) {
         onKeyDown={onKeyDown}
       >
         <div className="cmd-input-row">
-          <span className="cmd-icon">⌕</span>
+          <span className="cmd-icon">
+            <Icon name="search" size="sm" />
+          </span>
           <input
             ref={inputRef}
             className="cmd-input"
@@ -119,7 +122,9 @@ export function CommandPalette({ onClose, onOpenNote, initialQuery }: Props) {
                   choose(hit);
                 }}
               >
-                <div className="cmd-result-icon">📄</div>
+                <div className="cmd-result-icon">
+                  <Icon name="file" size="sm" />
+                </div>
                 <div>
                   <div className="cmd-result-title">{hit.title}</div>
                   <div className="cmd-result-sub">

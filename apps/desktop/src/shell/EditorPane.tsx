@@ -16,6 +16,7 @@ import {
   type SemanticResult,
 } from '../ipc';
 import { CodeMirrorHost } from '../editor/CodeMirrorHost';
+import { Icon } from '../icons/Icon';
 import { editorKind } from '../editor/editorKind';
 import { parseOutline } from '../editor/outline';
 
@@ -55,7 +56,9 @@ function Breadcrumb({ path, current }: { path: string[]; current: string }) {
       {path.map((seg, i) => (
         <span key={i} style={{ display: 'contents' }}>
           <span className="bc-seg">{seg}</span>
-          <span className="bc-sep">›</span>
+          <span className="bc-sep">
+            <Icon name="chevronRight" size={12} />
+          </span>
         </span>
       ))}
       <span className="bc-current">{current}</span>
@@ -180,7 +183,9 @@ export function EditorPane({
               <DocxView key={binaryPath} path={binaryPath} onEditAsMarkdown={onEditAsMarkdown} />
             ) : (
               <div className="format-placeholder">
-                <div className="fp-icon">◫</div>
+                <div className="fp-icon">
+                  <Icon name="file" size={36} />
+                </div>
                 <div className="fp-title">Unsupported file</div>
                 <div className="fp-note">{binaryPath.split('/').pop()} can&apos;t be opened in-app.</div>
               </div>
@@ -213,7 +218,7 @@ export function EditorPane({
             disabled={!note}
             onClick={() => setPanel((p) => (p === 'outline' ? 'none' : 'outline'))}
           >
-            ≡
+            <Icon name="outline" size="sm" />
           </button>
           <button
             className={`ea-btn${panel === 'properties' ? ' active' : ''}`}
@@ -222,7 +227,7 @@ export function EditorPane({
             disabled={!note}
             onClick={() => setPanel((p) => (p === 'properties' ? 'none' : 'properties'))}
           >
-            ◈
+            <Icon name="properties" size="sm" />
           </button>
           <button
             className={`ea-btn${copied ? ' active' : ''}`}
@@ -231,7 +236,7 @@ export function EditorPane({
             disabled={!note}
             onClick={() => void onShare()}
           >
-            ↗
+            <Icon name="share" size="sm" />
           </button>
         </div>
         {panel === 'outline' && (
@@ -274,10 +279,10 @@ export function EditorPane({
         <div className="note-title">{note?.title ?? 'No note open'}</div>
         {note && (
           <div className="note-meta">
-            <span>📅 {dateStr}</span>
-            <span>⟳ {relativeTime(note.mtime)}</span>
-            <span>◈ {note.word_count} words</span>
-            <span>↙ {backlinks.length} backlinks</span>
+            <span><Icon name="calendar" size={12} /> {dateStr}</span>
+            <span><Icon name="clock" size={12} /> {relativeTime(note.mtime)}</span>
+            <span><Icon name="words" size={12} /> {note.word_count} words</span>
+            <span><Icon name="backlink" size={12} /> {backlinks.length} backlinks</span>
           </div>
         )}
 

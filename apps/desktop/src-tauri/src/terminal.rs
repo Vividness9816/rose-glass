@@ -80,9 +80,26 @@ fn resolve_cwd(explicit: Option<String>, vault_root: Option<PathBuf>) -> Option<
     explicit.or_else(|| vault_root.map(|p| p.to_string_lossy().into_owned()))
 }
 
+/// First directory on PATH containing `exe`, if any. Used to prefer PowerShell only when
+/// it's actually installed (spawning a missing exe would fail the whole terminal).
+fn find_on_path(exe: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(exe))
+        .find(|p| p.is_file())
+}
+
 fn shell_command() -> CommandBuilder {
     if cfg!(windows) {
-        CommandBuilder::new(std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into()))
+        // Prefer PowerShell over cmd.exe: PowerShell sets DECSET 2004 (bracketed paste), so a
+        // multi-line right-click paste is inserted literally instead of auto-executing — the
+        // safe default for v2.1's clipboard work. pwsh (PS7) if installed, else Windows
+        // PowerShell 5.1 (always present), else COMSPEC/cmd.exe as a last resort.
+        let shell = find_on_path("pwsh.exe")
+            .or_else(|| find_on_path("powershell.exe"))
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into()));
+        CommandBuilder::new(shell)
     } else {
         CommandBuilder::new(std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()))
     }
@@ -279,12 +296,18 @@ mod tests {
             })
             .expect("openpty");
 
-        let mut cmd = shell_command();
-        if cfg!(windows) {
-            cmd.arg("/C");
+        // Pin the spike to cmd.exe/sh directly: it verifies the portable-pty round-trip,
+        // not the app's production shell choice (now PowerShell), so it must not depend on
+        // `shell_command()` — a PowerShell default would reject the `/C` flag.
+        let mut cmd = if cfg!(windows) {
+            let mut c = CommandBuilder::new(std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into()));
+            c.arg("/C");
+            c
         } else {
-            cmd.arg("-c");
-        }
+            let mut c = CommandBuilder::new(std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into()));
+            c.arg("-c");
+            c
+        };
         cmd.arg("echo rose_pty_ok_12345");
 
         let mut child = pair.slave.spawn_command(cmd).expect("spawn");

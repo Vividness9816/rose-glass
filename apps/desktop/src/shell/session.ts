@@ -8,6 +8,8 @@ export interface Session {
   vaultPath?: string;
   notePath?: string; // vault-relative
   railView?: string;
+  splitFraction?: number; // graph↔right split, 0..1 — clamped on read in Shell (splitLogic)
+  terminalHeight?: number; // drawer height in px — clamped on read in Shell (splitLogic)
 }
 
 export function loadSession(): Session {
