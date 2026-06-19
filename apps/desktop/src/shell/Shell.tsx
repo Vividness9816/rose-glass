@@ -21,6 +21,7 @@ import { siblingMdPath, toVaultRelative } from '../editor/fileOpen';
 import { GraphPane } from '../graph/GraphPane';
 import { Backdrop } from '../backdrop/Backdrop';
 import { TerminalPane } from '../terminal/TerminalPane';
+import { isUnattended } from '../terminal/attention';
 import { CommandPalette } from '../command/CommandPalette';
 import { ActivityPane } from '../activity/ActivityPane';
 import {
@@ -87,6 +88,8 @@ export function Shell() {
   const nextTermIdRef = useRef(1);
   const activeTermRef = useRef(activeTerm);
   activeTermRef.current = activeTerm;
+  const terminalOpenRef = useRef(terminalOpen); // drawer-visible, read inside the mount-once attention path
+  terminalOpenRef.current = terminalOpen;
   const [clustering, setClustering] = useState(false); // Phase 11 embed+cluster in progress
   const [clusterError, setClusterError] = useState<string | null>(null); // v2.0 model-load failure → Retry
   const [reindexing, setReindexing] = useState(false); // Settings: manual index rebuild in progress
@@ -170,10 +173,22 @@ export function Shell() {
       return n;
     });
   }, []);
-  // A background tab's PTY rang the bell (e.g. Claude Code awaiting input) → flag it green.
+  // A terminal's PTY emitted settled output or rang the bell. Flag it green ONLY if you
+  // can't see it right now (isUnattended: not the active tab, or drawer hidden, or window
+  // blurred) — the old code flagged background tabs only, so a single focused terminal
+  // awaiting a blurred-window Claude run never lit up (the bug the user reported).
   const markTermAttention = useCallback((id: number) => {
-    if (id === activeTermRef.current) return; // already focused — nothing to flag
-    setTermAttention((s) => (s.has(id) ? s : new Set(s).add(id)));
+    const attended = !isUnattended({
+      isActiveTab: id === activeTermRef.current,
+      isDrawerVisible: terminalOpenRef.current,
+      isWindowFocused: document.hasFocus(),
+    });
+    if (attended) return; // you're looking at it — nothing to flag
+    setTermAttention((s) => {
+      if (s.has(id)) return s;
+      console.debug(`terminal ${id} → attention (unattended, output settled/bell)`);
+      return new Set(s).add(id);
+    });
   }, []);
   const commitTermRename = useCallback((id: number, value: string) => {
     const name = value.trim();
@@ -250,6 +265,26 @@ export function Shell() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [openPalette, toggleTerminal]);
+
+  // Clear the active terminal's attention the moment you're looking at it again: when it
+  // becomes the active tab, when the drawer opens, or when the window regains focus. The old
+  // clear path (selectTerm only) missed the single-terminal / window-blur case.
+  useEffect(() => {
+    if (!terminalOpen) return;
+    const clearActive = () => {
+      if (!document.hasFocus()) return;
+      setTermAttention((s) => {
+        const id = activeTermRef.current;
+        if (!s.has(id)) return s;
+        const n = new Set(s);
+        n.delete(id);
+        return n;
+      });
+    };
+    clearActive(); // active-tab change or drawer just opened → clear now
+    window.addEventListener('focus', clearActive); // window refocus → clear then
+    return () => window.removeEventListener('focus', clearActive);
+  }, [activeTerm, terminalOpen]);
 
   const refreshGraph = useCallback(async (): Promise<GraphPayload | null> => {
     try {

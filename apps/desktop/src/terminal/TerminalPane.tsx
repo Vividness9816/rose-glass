@@ -72,6 +72,7 @@ export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention
     let unOut: UnlistenFn | undefined;
     let unExit: UnlistenFn | undefined;
     let disposed = false;
+    let settleTimer: number | undefined;
 
     // Never write to a disposed terminal (an output chunk can land mid-teardown).
     const writeSafe = (data: string | Uint8Array) => {
@@ -83,6 +84,16 @@ export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention
       }
     };
 
+    // Attention (v2.1): write the chunk, then (re)arm a settle timer. When output stops for
+    // ~400ms the command has likely finished / is waiting → signal the Shell, which flags
+    // the tab ONLY if it's unattended. A continuous stream keeps re-arming and never
+    // settles, so a long build won't scream; it flags once, when it goes quiet.
+    const onOutput = (data: string | Uint8Array) => {
+      writeSafe(data);
+      if (settleTimer !== undefined) clearTimeout(settleTimer);
+      settleTimer = window.setTimeout(() => onAttentionRef.current?.(), 400);
+    };
+
     void (async () => {
       try {
         id = await ptySpawn(null, term.cols, term.rows); // cwd=null → backend uses the vault root
@@ -92,7 +103,7 @@ export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention
           void ptyKill(id);
           return;
         }
-        unOut = await onPtyOutput(id, writeSafe);
+        unOut = await onPtyOutput(id, onOutput);
         if (disposed) {
           unOut();
           return;
@@ -187,6 +198,7 @@ export function TerminalPane({ theme, onAttention }: { theme: Theme; onAttention
 
     return () => {
       disposed = true;
+      if (settleTimer !== undefined) clearTimeout(settleTimer);
       ro.disconnect();
       host.removeEventListener('contextmenu', onContextMenu);
       unOut?.();
