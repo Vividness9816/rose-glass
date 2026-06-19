@@ -344,6 +344,18 @@ export class GraphRenderer implements GraphRendererLike {
     // nodes
     nodes.forEach((n) => {
       ctx.globalAlpha = this.nodeAlpha(n.id);
+      // ghost (unresolved-link placeholder): a small faded outline dot, no ornament.
+      if (n.ghost) {
+        ctx.globalAlpha = this.nodeAlpha(n.id) * 0.5;
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = rgba(theme.label, 0.25);
+        ctx.fill();
+        ctx.strokeStyle = rgba(theme.label, 0.35);
+        ctx.lineWidth = 0.6;
+        ctx.stroke();
+        return;
+      }
       const cluster = clusterRgb(n.cluster);
       const clusterAccent = theme.clusters[n.cluster]?.accent ?? theme.clusters[0].accent;
       // Phase-6 bullseye inversion (theme-driven): dark = cluster-colour shell + ink core;
@@ -389,11 +401,6 @@ export class GraphRenderer implements GraphRendererLike {
           ctx.fillStyle = rgba(rgbC, 0.6);
           ctx.fill();
         }
-        ctx.font = 'bold 10px Inter, sans-serif';
-        ctx.fillStyle = rgba(theme.label, 0.85);
-        ctx.textAlign = 'center';
-        ctx.fillText(n.name, n.x, n.y + n.r + 14);
-        ctx.textAlign = 'left';
       } else if (n.links >= 2) {
         ctx.beginPath();
         ctx.arc(n.x, n.y, n.r + 2 + pulse * 2.5, 0, Math.PI * 2);
@@ -428,6 +435,19 @@ export class GraphRenderer implements GraphRendererLike {
         ctx.stroke();
       }
     });
+
+    // labels: only for the hovered set (focus) — Obsidian-style hover labels (no hover = none).
+    if (this.focusSet) {
+      ctx.globalAlpha = 1;
+      ctx.font = 'bold 10px Inter, sans-serif';
+      ctx.fillStyle = rgba(theme.label, 0.9);
+      ctx.textAlign = 'center';
+      for (const id of this.focusSet) {
+        const n = this.byId.get(id);
+        if (n) ctx.fillText(n.name, n.x, n.y + n.r + 14);
+      }
+      ctx.textAlign = 'left';
+    }
 
     // activity flares + the next frame's base layer always render at full strength,
     // regardless of focus dimming applied to the node/edge layers above.
