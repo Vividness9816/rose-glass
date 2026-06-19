@@ -12,6 +12,23 @@ import { probeWebGpu } from './webgpu/probe';
 import { Icon } from '../icons/Icon';
 import './graph.css';
 
+// Persisted GPU/2D renderer preference.
+const GPU_KEY = 'rose-glass:graph-gpu';
+function loadGpuPref(): boolean {
+  try {
+    return localStorage.getItem(GPU_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+function saveGpuPref(on: boolean): void {
+  try {
+    localStorage.setItem(GPU_KEY, on ? '1' : '0');
+  } catch {
+    /* private mode / quota — preference just won't persist this session */
+  }
+}
+
 /** Graph pane: mockup chrome + the live canvas-2D graph. Uses `data` (from the
  *  indexer) when given, else mock data. Rebuilds the renderer when `data` changes. */
 function GraphPaneInner({
@@ -44,6 +61,9 @@ function GraphPaneInner({
   const onOpenNodeRef = useRef(onOpenNode);
   onOpenNodeRef.current = onOpenNode;
   const [gpuOn, setGpuOn] = useState(false); // user intent: try the WebGPU path
+  // Saved GPU pref, read once. We start 2D and restore this only AFTER the probe confirms
+  // WebGPU is available (below), so a stored 'GPU' never strands us on a 2D-committed canvas.
+  const wantGpuRef = useRef(loadGpuPref());
   const [gpuAvailable, setGpuAvailable] = useState<boolean | null>(null); // null = probing
   const [gpuReason, setGpuReason] = useState('probing…');
   // Read availability inside build() via a ref so the probe RESOLVING doesn't re-run
@@ -64,6 +84,9 @@ function GraphPaneInner({
       if (cancelled) return;
       setGpuAvailable(c.ok);
       setGpuReason(c.reason);
+      // restore the saved GPU preference now that availability is known (build effect re-runs
+      // on the gpuOn change and reads gpuAvailableRef = true → builds the GPU renderer).
+      if (c.ok && wantGpuRef.current) setGpuOn(true);
     });
     return () => {
       cancelled = true;
@@ -287,7 +310,13 @@ function GraphPaneInner({
           <button
             className={`gc-btn${gpuOn ? ' active' : ''}`}
             type="button"
-            onClick={() => setGpuOn((v) => !v)}
+            onClick={() =>
+              setGpuOn((v) => {
+                const next = !v;
+                saveGpuPref(next); // persist only on explicit user toggle (not device-loss fallback)
+                return next;
+              })
+            }
             disabled={!gpuAvailable}
             aria-pressed={gpuOn}
             title={
