@@ -66,6 +66,9 @@ export interface GraphNodeMeta {
   title: string;
   cluster: number | null;
   link_count: number;
+  /** true = an unresolved-link placeholder (faded, non-openable). Always sent by the
+      backend; optional here so test payloads needn't spell it out. */
+  is_ghost?: boolean;
 }
 export interface GraphEdgeMeta {
   src: string;

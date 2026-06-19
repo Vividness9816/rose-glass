@@ -13,7 +13,7 @@ import { makeRng, stepSimulation } from './simulation';
 import type { GraphNode } from './types';
 
 function node(id: number, x: number, y: number, r = 6, cluster = 0): GraphNode {
-  return { id, path: `n${id}.md`, name: `n${id}`, x, y, vx: 0, vy: 0, cluster, links: 0, phase: 0, r, hub: false };
+  return { id, path: `n${id}.md`, name: `n${id}`, x, y, vx: 0, vy: 0, cluster, links: 0, phase: 0, r, hub: false, ghost: false };
 }
 
 describe('camera', () => {

@@ -16,6 +16,7 @@ function node(path: string): GraphNode {
     phase: 0,
     r: 4,
     hub: false,
+    ghost: false,
   };
 }
 

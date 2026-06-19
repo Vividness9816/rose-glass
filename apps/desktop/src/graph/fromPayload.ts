@@ -10,6 +10,7 @@ export function payloadToGraphData(p: GraphPayload): GraphData {
 
   const nodes: GraphNode[] = p.nodes.map((n, i) => {
     idOf.set(n.path, i);
+    const ghost = !!n.is_ghost;
     return {
       id: i,
       path: n.path,
@@ -21,9 +22,10 @@ export function payloadToGraphData(p: GraphPayload): GraphData {
       vy: 0,
       phase: Math.random() * Math.PI * 2,
       cluster: (n.cluster ?? i) % 4, // clusters empty this phase → spread 0..3 by index
-      links: n.link_count,
-      r: 4 + 7 * (n.link_count / maxLinks),
-      hub: n.link_count >= maxLinks * 0.66,
+      links: ghost ? 0 : n.link_count,
+      r: ghost ? 4 : 4 + 7 * (n.link_count / maxLinks),
+      hub: !ghost && n.link_count >= maxLinks * 0.66, // a ghost never renders as a hub
+      ghost,
     };
   });
 

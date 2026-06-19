@@ -26,6 +26,22 @@ describe('payloadToGraphData', () => {
     expect(payloadToGraphData(p).edges).toHaveLength(0);
   });
 
+  it('carries ghost nodes and keeps edges pointing at them', () => {
+    const p: GraphPayload = {
+      nodes: [
+        { path: 'a.md', title: 'A', cluster: null, link_count: 1, is_ghost: false },
+        { path: 'Missing', title: 'Missing', cluster: null, link_count: 0, is_ghost: true },
+      ],
+      edges: [{ src: 'a.md', dst: 'Missing' }],
+    };
+    const gd = payloadToGraphData(p);
+    const ghost = gd.nodes.find((n) => n.path === 'Missing')!;
+    expect(ghost.ghost).toBe(true);
+    expect(ghost.hub).toBe(false);
+    expect(gd.nodes.find((n) => n.path === 'a.md')!.ghost).toBe(false);
+    expect(gd.edges).toHaveLength(1); // edge to the ghost survives (ghost path is in idOf)
+  });
+
   it('spreads clusters into 0..3 when payload clusters are null', () => {
     const nodes = Array.from({ length: 8 }, (_, i) => ({
       path: `n${i}.md`,
