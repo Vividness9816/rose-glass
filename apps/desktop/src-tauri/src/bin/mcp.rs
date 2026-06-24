@@ -33,6 +33,44 @@ fn main() {
     // and the resolved path is loggable; fall back to the raw arg if it doesn't resolve yet.
     let root = std::fs::canonicalize(&vault).unwrap_or_else(|_| PathBuf::from(&vault));
     let db_path = root.join(".rose-glass").join("index.db");
+
+    // `--check` doctor: print one JSON status line and exit (no read loop). Always opens the db
+    // READ-ONLY. Exit 0 if the index exists, 1 if it's missing/unreadable, 2 on bad args (above).
+    // Diagnoses the most common foot-gun: --vault pointing at a folder with no built index.
+    if args.iter().any(|a| a == "--check") {
+        let exists = db_path.exists();
+        let (count, last): (i64, i64) = if exists {
+            match Connection::open_with_flags(
+                &db_path,
+                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+            ) {
+                Ok(c) => (
+                    c.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0)).unwrap_or(0),
+                    c.query_row("SELECT COALESCE(MAX(indexed_at),0) FROM notes", [], |r| r.get(0))
+                        .unwrap_or(0),
+                ),
+                Err(e) => {
+                    eprintln!("rose-glass-mcp --check: cannot open db: {e}");
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            (0, 0)
+        };
+        println!(
+            "{}",
+            json!({
+                "vault": root.display().to_string(),
+                "db": db_path.display().to_string(),
+                "exists": exists,
+                "note_count": count,
+                "last_indexed_at": last,
+                "mode": if allow_write { "read-write" } else { "read-only" },
+            })
+        );
+        std::process::exit(if exists { 0 } else { 1 });
+    }
+
     let flags = if allow_write {
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI
     } else {
@@ -45,6 +83,15 @@ fn main() {
     // Wait out transient SQLITE_BUSY (a WAL checkpoint while the app writes) instead of
     // failing the query — matches the 5000ms the rest of the codebase uses (db::apply_pragmas).
     let _ = conn.busy_timeout(std::time::Duration::from_millis(5000));
+
+    // Loud startup line on stderr (stdout is the JSON-RPC channel) so a stale/wrong --vault or an
+    // unexpected read-only/read-write mode is diagnosable from the client's server log.
+    eprintln!(
+        "rose-glass-mcp: vault={} db={} mode={}",
+        root.display(),
+        db_path.display(),
+        if allow_write { "read-write" } else { "read-only" },
+    );
 
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
