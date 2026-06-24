@@ -44,7 +44,7 @@ const SKIP_DIRS: &[&str] = &["node_modules", "target", "dist", "build", "vendor"
 /// was dropped deliberately — a gitignored-but-not-skipped `.md` edited live would be
 /// watcher-indexed yet rebuild-excluded, breaking A3. Re-add only via a shared nested
 /// matcher across all three paths if it's ever worth the plumbing (see ADR-20260618-v2).
-pub(crate) fn should_skip(rel: &str) -> bool {
+pub fn should_skip(rel: &str) -> bool {
     rel.split('/').any(|seg| {
         if seg.starts_with('.') {
             return true;
