@@ -11,8 +11,8 @@
 //! SQL; extract a lean shared `vault-db` crate if/when the sidecar ships standalone.
 
 use desktop_lib::capture;
-use desktop_lib::db::queries;
-use rusqlite::{Connection, OpenFlags};
+use desktop_lib::db::{self, queries};
+use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
@@ -40,10 +40,7 @@ fn main() {
     if args.iter().any(|a| a == "--check") {
         let exists = db_path.exists();
         let (count, last): (i64, i64) = if exists {
-            match Connection::open_with_flags(
-                &db_path,
-                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
-            ) {
+            match db::open_indexed(&db_path, db::Mode::ReadOnly) {
                 Ok(c) => (
                     c.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0)).unwrap_or(0),
                     c.query_row("SELECT COALESCE(MAX(indexed_at),0) FROM notes", [], |r| r.get(0))
@@ -71,18 +68,13 @@ fn main() {
         std::process::exit(if exists { 0 } else { 1 });
     }
 
-    let flags = if allow_write {
-        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI
-    } else {
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI
-    };
-    let mut conn = Connection::open_with_flags(&db_path, flags).unwrap_or_else(|e| {
+    // Open through the canonical constructor so the sidecar's connection matches the app's/tests'
+    // pragmas (FK ON + busy_timeout; WAL/synchronous when read-write) — no hand-rolled flags.
+    let mode = if allow_write { db::Mode::ReadWrite } else { db::Mode::ReadOnly };
+    let mut conn = db::open_indexed(&db_path, mode).unwrap_or_else(|e| {
         eprintln!("rose-glass-mcp: cannot open {}: {e}", db_path.display());
         std::process::exit(1);
     });
-    // Wait out transient SQLITE_BUSY (a WAL checkpoint while the app writes) instead of
-    // failing the query — matches the 5000ms the rest of the codebase uses (db::apply_pragmas).
-    let _ = conn.busy_timeout(std::time::Duration::from_millis(5000));
 
     // Loud startup line on stderr (stdout is the JSON-RPC channel) so a stale/wrong --vault or an
     // unexpected read-only/read-write mode is diagnosable from the client's server log.
