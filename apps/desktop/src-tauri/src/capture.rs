@@ -3,7 +3,7 @@
 //! directly, so the A3 rebuild-equivalence invariant holds. All agent writes funnel here.
 
 use crate::fs_safe::{atomic_write, safe_join};
-use crate::indexer::pipeline::{incremental, should_skip};
+use crate::indexer::pipeline::{incremental, is_markdown, should_skip};
 use crate::indexer::IndexOutcome;
 use rusqlite::Connection;
 use std::path::{Component, Path};
@@ -76,9 +76,10 @@ pub fn dedup_rel(root: &Path, rel: &str) -> String {
     rel.to_string() // pathological collision count; write_note will upsert in place
 }
 
-/// The single confined agent write. Validates the path FULLY before touching the filesystem,
-/// writes the markdown FILE atomically, then derives the SQLite row synchronously (the app/watcher
-/// may be down, so we must index in-process). Returns the vault-relative path actually written.
+/// The single confined agent write. Validates the path FULLY before touching the filesystem —
+/// it must be a MARKDOWN file under `inbox/` (the agent's quarantine; never an arbitrary vault
+/// note or non-note file) — writes the file atomically, then derives the SQLite row synchronously
+/// (the app/watcher may be down, so we must index in-process). Returns the path actually written.
 ///
 /// Confinement order matters: every reject runs BEFORE `create_dir_all`, because that call mutates
 /// the filesystem and a `..`/absolute/backslash path would otherwise create directories outside the
@@ -113,6 +114,19 @@ pub fn write_note(
         });
     if rooted_or_traversing {
         return Err(format!("refusing an absolute/rooted/traversing path: {rel}"));
+    }
+    // Confine EVERY agent write to a MARKDOWN file under inbox/ — the ADR's "safe_join (inbox-only)"
+    // contract + the plan's Global Constraint ("All MCP write paths confined to <vault>/inbox/").
+    // (a) An attacker-supplied `path` can't overwrite an arbitrary existing vault note (README.md,
+    // a real source note) — only the agent's own inbox captures. (b) Requiring markdown keeps the
+    // write keying-space identical to full_rebuild's is_markdown filter, so a non-.md write can't
+    // create a row a rebuild would drop — preserving A3. "inbox/" (trailing slash) also blocks the
+    // "inboxevil/x.md" prefix trick.
+    if !rel.starts_with("inbox/") {
+        return Err(format!("agent writes are confined to inbox/: {rel}"));
+    }
+    if !is_markdown(Path::new(rel)) {
+        return Err(format!("agent writes must be markdown (.md/.markdown): {rel}"));
     }
     // Path is now a clean forward-slash relative path; safe to materialize the parent dir.
     if let Some(slash) = rel.rfind('/') {
@@ -218,6 +232,31 @@ mod tests {
         assert!(write_note(&mut conn, root.path(), "../escape.md", "x").is_err());
         assert!(write_note(&mut conn, root.path(), ".rose-glass/x.md", "x").is_err());
         assert!(write_note(&mut conn, root.path(), "node_modules/x.md", "x").is_err());
+    }
+
+    #[test]
+    fn write_note_rejects_outside_inbox() {
+        // ADR inbox-only contract: an explicit `path` must not let an agent overwrite an arbitrary
+        // existing vault note. Only inbox/ captures are writable.
+        let root = tempfile::tempdir().unwrap();
+        let mut conn = open();
+        assert!(write_note(&mut conn, root.path(), "README.md", "x").is_err());
+        assert!(write_note(&mut conn, root.path(), "notes/important.md", "x").is_err());
+        assert!(write_note(&mut conn, root.path(), "inboxevil/x.md", "x").is_err(), "prefix trick");
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn write_note_rejects_non_markdown_in_inbox() {
+        // A non-.md write would corrupt a real file AND break A3 (incremental indexes it, but
+        // full_rebuild's is_markdown filter would skip it on rebuild → disk/DB divergence).
+        let root = tempfile::tempdir().unwrap();
+        let mut conn = open();
+        assert!(write_note(&mut conn, root.path(), "inbox/package.json", "x").is_err());
+        assert!(write_note(&mut conn, root.path(), "inbox/styles.css", "x").is_err());
+        // .markdown is allowed
+        assert!(write_note(&mut conn, root.path(), "inbox/n.markdown", "---\ntitle: N\nsummary: s\n---\n\nb").is_ok());
     }
 
     #[test]

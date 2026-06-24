@@ -206,7 +206,7 @@ fn tool_defs(allow_write: bool) -> Value {
     if allow_write {
         tools.push(json!({
             "name": "upsert_note",
-            "description": "Capture a note into the vault inbox. Writes a markdown file (the agent MUST provide a one-line summary) and indexes it. The ONLY write path. Omit `path` to create inbox/<slug>.md (auto-deduped); pass `path` to update an existing note in place.",
+            "description": "Capture a note into the vault inbox. Writes a markdown file (the agent MUST provide a one-line summary) and indexes it. The ONLY write path; all writes are confined to inbox/ (it cannot touch other vault notes). Omit `path` to create inbox/<slug>.md (auto-deduped, never clobbers); pass an inbox/*.md `path` to update that capture in place.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -214,7 +214,7 @@ fn tool_defs(allow_write: bool) -> Value {
                     "summary": { "type": "string", "minLength": 1, "description": "One-line summary (mandatory)." },
                     "body":    { "type": "string" },
                     "tags":    { "type": "array", "items": { "type": "string" } },
-                    "path":    { "type": "string", "description": "Optional vault-relative path to UPDATE in place; omit to create inbox/<slug>.md." }
+                    "path":    { "type": "string", "description": "Optional inbox/<name>.md path to UPDATE in place; omit to create inbox/<slug>.md. Confined to inbox/." }
                 },
                 "required": ["title", "summary", "body"]
             }
@@ -581,6 +581,64 @@ mod tests {
         ).unwrap();
         assert_eq!(resp["result"]["isError"], false);
         assert!(resp["result"]["structuredContent"].is_null());
+    }
+
+    #[test]
+    fn upsert_note_dedups_colliding_title_instead_of_clobbering() {
+        let root = tempfile::tempdir().unwrap();
+        let p = root.path().join(".rose-glass/index.db");
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        let mut c = db::open_db(&p).unwrap();
+        db::migrate(&c).unwrap();
+        let mk = |body: &str| json!({"jsonrpc":"2.0","id":80,"method":"tools/call",
+            "params":{"name":"upsert_note","arguments":{"title":"Test Note","summary":"s","body":body}}});
+        let r1 = handle_request(&mk("first"), &mut c, true, root.path()).unwrap();
+        assert_eq!(r1["result"]["structuredContent"]["path"], "inbox/test-note.md");
+        let r2 = handle_request(&mk("second"), &mut c, true, root.path()).unwrap();
+        assert_eq!(r2["result"]["structuredContent"]["path"], "inbox/test-note-2.md", "must dedup, not clobber");
+        assert!(root.path().join("inbox/test-note.md").exists());
+        assert!(root.path().join("inbox/test-note-2.md").exists());
+    }
+
+    #[test]
+    fn upsert_note_updates_in_place_via_explicit_path() {
+        let root = tempfile::tempdir().unwrap();
+        let p = root.path().join(".rose-glass/index.db");
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        let mut c = db::open_db(&p).unwrap();
+        db::migrate(&c).unwrap();
+        handle_request(
+            &json!({"jsonrpc":"2.0","id":81,"method":"tools/call","params":{"name":"upsert_note",
+                "arguments":{"title":"First","summary":"s","body":"a","path":"inbox/note.md"}}}),
+            &mut c, true, root.path(),
+        ).unwrap();
+        let r = handle_request(
+            &json!({"jsonrpc":"2.0","id":82,"method":"tools/call","params":{"name":"upsert_note",
+                "arguments":{"title":"Second","summary":"s","body":"b changed","path":"inbox/note.md"}}}),
+            &mut c, true, root.path(),
+        ).unwrap();
+        assert_eq!(r["result"]["structuredContent"]["path"], "inbox/note.md");
+        let count: i64 = c.query_row("SELECT COUNT(*) FROM notes WHERE path='inbox/note.md'", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1, "explicit path updates in place, not a new row");
+        let title: String = c.query_row("SELECT title FROM notes WHERE path='inbox/note.md'", [], |r| r.get(0)).unwrap();
+        assert_eq!(title, "Second", "content refreshed in place");
+    }
+
+    #[test]
+    fn upsert_note_rejects_non_inbox_path() {
+        // The explicit-path branch must not let an agent overwrite an arbitrary vault note.
+        let root = tempfile::tempdir().unwrap();
+        let p = root.path().join(".rose-glass/index.db");
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        let mut c = db::open_db(&p).unwrap();
+        db::migrate(&c).unwrap();
+        let resp = handle_request(
+            &json!({"jsonrpc":"2.0","id":83,"method":"tools/call","params":{"name":"upsert_note",
+                "arguments":{"title":"x","summary":"s","body":"b","path":"README.md"}}}),
+            &mut c, true, root.path(),
+        ).unwrap();
+        assert_eq!(resp["result"]["isError"], true, "writing outside inbox/ must be refused");
+        assert!(!root.path().join("README.md").exists());
     }
 
     #[test]

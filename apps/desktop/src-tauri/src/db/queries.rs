@@ -579,10 +579,14 @@ pub fn maintenance_report(conn: &Connection) -> rusqlite::Result<MaintenanceRepo
         .map(|e| e.path)
         .collect();
     let orphans: Vec<String> = {
+        // Exclude SELF-links from both clauses: the resolver legitimately emits dst_path == src_path
+        // for an intra-note link (e.g. `[[#heading]]` or `[[self]]`), which is NOT a real graph
+        // connection — without the `!= n.path` guards a note whose only link is to itself would be
+        // hidden from the orphan list, defeating the report's purpose.
         let mut stmt = conn.prepare(
             "SELECT n.path FROM notes n
-             WHERE NOT EXISTS (SELECT 1 FROM links l WHERE l.src_path = n.path AND l.dst_path IS NOT NULL)
-               AND NOT EXISTS (SELECT 1 FROM links l WHERE l.dst_path = n.path)
+             WHERE NOT EXISTS (SELECT 1 FROM links l WHERE l.src_path = n.path AND l.dst_path IS NOT NULL AND l.dst_path <> n.path)
+               AND NOT EXISTS (SELECT 1 FROM links l WHERE l.dst_path = n.path AND l.src_path <> n.path)
              ORDER BY n.path",
         )?;
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
@@ -679,6 +683,19 @@ mod semantic_tests {
         assert!(r.embeddings_stale, "0 embeddings for 2 notes");
         assert!(r.missing_summary.contains(&"b.md".to_string()));
         assert!(!r.orphans.contains(&"b.md".to_string()), "b.md has an inbound link");
+    }
+
+    #[test]
+    fn maintenance_report_counts_a_self_linking_note_as_an_orphan() {
+        // A note whose ONLY link is a resolved self-link ([[#heading]] / [[self]]) has no real
+        // graph connections — it must still be reported as an orphan (regression: self-links were
+        // counted as connections, hiding exactly the disconnected notes the report exists to find).
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        conn.execute("INSERT INTO notes (path,title,content_hash,mtime,word_count,indexed_at) VALUES ('x.md','X','h',0,1,0)", []).unwrap();
+        conn.execute("INSERT INTO links (src_path,dst_path,dst_raw,link_type) VALUES ('x.md','x.md','#heading','wikilink')", []).unwrap();
+        let r = maintenance_report(&conn).unwrap();
+        assert!(r.orphans.contains(&"x.md".to_string()), "a self-link is not a real connection");
     }
 
     #[test]
