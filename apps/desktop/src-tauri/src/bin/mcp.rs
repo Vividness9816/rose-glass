@@ -122,6 +122,15 @@ fn tool_defs(allow_write: bool) -> Value {
             "description": "List the vault's semantic clusters (groups of related notes by id). Requires the embeddings/clustering phase; returns an empty list until clusters are computed.",
             "inputSchema": { "type": "object", "properties": {} }
         }),
+        json!({
+            "name": "get_note",
+            "description": "Fetch one note's metadata, frontmatter, tags and outgoing links by vault-relative path. Returns null if the path is not indexed.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "path": { "type": "string", "description": "Vault-relative, forward-slash path." } },
+                "required": ["path"]
+            }
+        }),
     ];
     // The write tool is advertised ONLY under --allow-write, so a default (read-only) server is
     // provably non-mutating: a client that never sees upsert_note cannot call it.
@@ -174,6 +183,14 @@ fn call_tool(
             Ok(groups) => tool_ok(id, &groups),
             Err(e) => tool_err(id, &e.to_string()),
         },
+        "get_note" => {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            match queries::get_note(&*conn, path) {
+                Ok(Some(note)) => tool_ok(id, &note),
+                Ok(None) => tool_ok(id, &Value::Null), // not indexed → null, not an error
+                Err(e) => tool_err(id, &e.to_string()),
+            }
+        }
         "upsert_note" if allow_write => upsert_note(id, &args, conn, root),
         // Unadvertised + uncallable without the flag: a hand-rolled client that sends it anyway
         // gets method-not-found, never a write.
@@ -422,6 +439,28 @@ mod tests {
         assert_eq!(resp["result"]["isError"], false, "resp: {resp}");
         assert_eq!(resp["result"]["structuredContent"]["path"], "inbox/test-note.md");
         assert!(root.path().join("inbox/test-note.md").exists());
+    }
+
+    #[test]
+    fn get_note_returns_the_note() {
+        let resp = handle_request(
+            &json!({"jsonrpc":"2.0","id":40,"method":"tools/call",
+                    "params":{"name":"get_note","arguments":{"path":"a.md"}}}),
+            &mut seeded(), false, std::path::Path::new("."),
+        ).unwrap();
+        assert_eq!(resp["result"]["isError"], false);
+        assert_eq!(resp["result"]["structuredContent"]["title"], "Alpha Note");
+    }
+
+    #[test]
+    fn get_note_missing_path_returns_null_not_error() {
+        let resp = handle_request(
+            &json!({"jsonrpc":"2.0","id":41,"method":"tools/call",
+                    "params":{"name":"get_note","arguments":{"path":"nope.md"}}}),
+            &mut seeded(), false, std::path::Path::new("."),
+        ).unwrap();
+        assert_eq!(resp["result"]["isError"], false);
+        assert!(resp["result"]["structuredContent"].is_null());
     }
 
     #[test]
