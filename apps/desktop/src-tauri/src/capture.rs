@@ -51,6 +51,31 @@ pub fn derive_rel(title: &str) -> String {
     format!("inbox/{slug}.md")
 }
 
+/// For a NEW capture, pick a vault-relative path that does not clobber a DIFFERENT existing note:
+/// `inbox/foo.md` → `inbox/foo-2.md` → `inbox/foo-3.md` … (hyphen suffix, slug-consistent with
+/// `derive_rel`; the drag-drop ingest path uses a " (n)" suffix for arbitrary dropped filenames).
+/// The CREATE-vs-UPDATE intent lives in the caller (`upsert_note`): a request with an explicit
+/// `path` updates in place and skips this; a new capture runs through here so it never overwrites.
+/// ponytail: plain exists()-probe, not an atomic create_new reservation — the MCP sidecar is
+/// single-threaded, so the only race is a concurrent cross-process app write, which at worst
+/// upserts (A3 keeps disk/DB consistent), never corrupts. Use create_new if that race ever bites.
+pub fn dedup_rel(root: &Path, rel: &str) -> String {
+    if !root.join(rel).exists() {
+        return rel.to_string();
+    }
+    let (stem, dot_ext) = match rel.rsplit_once('.') {
+        Some((s, e)) => (s.to_string(), format!(".{e}")),
+        None => (rel.to_string(), String::new()),
+    };
+    for n in 2..10_000 {
+        let candidate = format!("{stem}-{n}{dot_ext}");
+        if !root.join(&candidate).exists() {
+            return candidate;
+        }
+    }
+    rel.to_string() // pathological collision count; write_note will upsert in place
+}
+
 /// The single confined agent write. Validates the path FULLY before touching the filesystem,
 /// writes the markdown FILE atomically, then derives the SQLite row synchronously (the app/watcher
 /// may be down, so we must index in-process). Returns the vault-relative path actually written.
@@ -158,6 +183,19 @@ mod tests {
     fn derive_rel_slugifies_into_inbox() {
         assert_eq!(derive_rel("Hello, World!"), "inbox/hello-world.md");
         assert_eq!(derive_rel("  Spaces   &  Symbols  "), "inbox/spaces-symbols.md");
+    }
+
+    #[test]
+    fn dedup_rel_suffixes_only_on_collision() {
+        let root = tempfile::tempdir().unwrap();
+        // no collision → unchanged
+        assert_eq!(dedup_rel(root.path(), "inbox/foo.md"), "inbox/foo.md");
+        std::fs::create_dir_all(root.path().join("inbox")).unwrap();
+        std::fs::write(root.path().join("inbox/foo.md"), "x").unwrap();
+        // a different note slugging to the same path is suffixed, not clobbered
+        assert_eq!(dedup_rel(root.path(), "inbox/foo.md"), "inbox/foo-2.md");
+        std::fs::write(root.path().join("inbox/foo-2.md"), "x").unwrap();
+        assert_eq!(dedup_rel(root.path(), "inbox/foo.md"), "inbox/foo-3.md");
     }
 
     #[test]
