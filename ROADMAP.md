@@ -41,6 +41,12 @@ with a riskiest-premise spike on a tiny scope before its build.
   persists), categorized settings menu (vim/spellcheck/auto-pair/smart-lists/HTML→MD paste), reading
   mode (markdown-it), multi-document **tabs** (ADR-20260619 — single buffer unchanged + pure tabs.ts),
   General version/Check-for-Updates + in-app Help. Gates green (tsc 0 · vitest 119 · cargo 75 · build 0).
+- **Agent interface (MCP)** (ADR-20260623; branch `fix/clusters-wiring-2026-06-23`, **not merged**) —
+  Claude Code navigates + captures the vault through the read-only `rose-glass-mcp` stdio sidecar:
+  `search`/`get_note`/`manifest`/`related`/`get_semantic_clusters`/`maintenance_report`, plus
+  `upsert_note` under `--allow-write` (inbox-only, file-first, A3-safe). 6 phases, two 3-lens reviews,
+  E2E stdio proof. See STATUS.md "Agent interface (MCP) shipped" + `docs/agent-interface.md`. Gates:
+  cargo 96+22 · vitest 119 · tsc/build 0.
 
 ## Active frontier (historical — pre-v1.0 round-2 feedback, 2026-06-17 PM)
 ~~Primary: GPU shader parity~~ ✅ **DONE** (Phase 4 row above — GPU-visual parity + Focus + inversion,
