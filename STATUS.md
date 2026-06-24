@@ -66,7 +66,7 @@ brainstorm→spec→plan→build per leg; leg 4 via `/council` (**ADR-20260619-r
   rendering a guide through the reading view (deviation from a bundled help.pdf — PdfView is
   vault-relative only).
 
-## Agent interface (MCP) shipped (ADR-20260623) — branch `fix/clusters-wiring-2026-06-23`, NOT merged
+## Agent interface (MCP) shipped (ADR-20260623) — ✅ MERGED to master 2026-06-23 (PR #4, merge `78b4c6b`)
 Wires Rose Glass as the agent-facing KB: Claude Code navigates + captures via the **read-only
 `rose-glass-mcp` stdio sidecar** instead of ripgrep + sequential file reads (works app-closed — the
 client spawns it). Built discovery (`docs/agent-interface-findings.md`) → `/council` (ADR-20260623) →
@@ -95,7 +95,7 @@ phases, 14 atomic commits, **two 3-lens adversarial reviews** (Phase 1 + Phases 
   `docs/proof/agent-interface-mcp-session.txt` (a JSON-RPC session: `upsert_note` → the new note is
   immediately surfaced by `search`/`get_note`/`manifest` through the pipe). README + `docs/agent-interface.md` added.
 - **Deferred (documented):** `manifest` result cap (a LIMIT would silently truncate a whole-vault triage
-  list); free-text-semantic-over-MCP + RRF (needs the model in the sidecar — ADR). Commits `d169f60..700e988`.
+  list); free-text-semantic-over-MCP + RRF (needs the model in the sidecar — ADR). Commits `d169f60..2997475`, merged to master via `78b4c6b` (PR #4).
 
 ## Phase 12 — §20 acceptance gate PASSED → v1.0 (2026-06-18)
 **All 11 §20 rows ✅ proven.** A3/A4/A7/A9/A10 were headless/test-proven earlier; the 6

@@ -41,7 +41,7 @@ with a riskiest-premise spike on a tiny scope before its build.
   persists), categorized settings menu (vim/spellcheck/auto-pair/smart-lists/HTML→MD paste), reading
   mode (markdown-it), multi-document **tabs** (ADR-20260619 — single buffer unchanged + pure tabs.ts),
   General version/Check-for-Updates + in-app Help. Gates green (tsc 0 · vitest 119 · cargo 75 · build 0).
-- **Agent interface (MCP)** (ADR-20260623; branch `fix/clusters-wiring-2026-06-23`, **not merged**) —
+- **Agent interface (MCP)** (ADR-20260623; ✅ **MERGED** to master via PR #4, merge `78b4c6b`) —
   Claude Code navigates + captures the vault through the read-only `rose-glass-mcp` stdio sidecar:
   `search`/`get_note`/`manifest`/`related`/`get_semantic_clusters`/`maintenance_report`, plus
   `upsert_note` under `--allow-write` (inbox-only, file-first, A3-safe). 6 phases, two 3-lens reviews,
