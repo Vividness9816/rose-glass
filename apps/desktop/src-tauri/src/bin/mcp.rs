@@ -11,14 +11,67 @@
 //! SQL; extract a lean shared `vault-db` crate if/when the sidecar ships standalone.
 
 use desktop_lib::capture;
-use desktop_lib::db::queries;
-use rusqlite::{Connection, OpenFlags};
+use desktop_lib::db::{self, queries};
+use desktop_lib::{cluster, embed, knn};
+use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
+/// Reject a pathological multi-MB free-text query before the model load (MiniLM truncates to its
+/// token window anyway). Mirrors commands.rs.
+const MAX_QUERY_BYTES: usize = 8192;
+/// Cap the semantic top-k (response + title fan-out) for an untrusted k.
+const MAX_KNN_K: usize = 200;
+
+/// One process-wide embedding model for the sidecar (one process serves one vault over stdio).
+/// Lazily loaded on the first reembed/semantic_search; a failed load is remembered (no re-download).
+/// ponytail: process-global because the sidecar is single-vault/single-process — key by vault if it
+/// ever multiplexes.
+fn model_cache() -> &'static Mutex<embed::ModelCache> {
+    static C: OnceLock<Mutex<embed::ModelCache>> = OnceLock::new();
+    C.get_or_init(|| Mutex::new(embed::ModelCache::default()))
+}
+
+/// The on-disk model-cache dir, resolved once in main() (mirrors the app's app_cache_dir()/models
+/// so the sidecar reuses the already-downloaded model). Defaults to "." only if main() never set it
+/// (the model-free test paths never load the model, so they never read it).
+static MODEL_DIR: OnceLock<PathBuf> = OnceLock::new();
+fn model_dir() -> &'static Path {
+    MODEL_DIR.get().map(|p| p.as_path()).unwrap_or_else(|| Path::new("."))
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// The app stores the model under Tauri's `app_cache_dir()/models` for identifier
+/// `lab.home.roseglass`. The sidecar has no AppHandle, so derive the same OS cache base from env
+/// (Windows %LOCALAPPDATA%; macOS ~/Library/Caches; else $XDG_CACHE_HOME or ~/.cache). A
+/// `--model-cache <dir>` flag overrides if the derivation ever diverges (the resolved dir is logged
+/// at startup, so a needless re-download is diagnosable). Last-ditch: the gitignored vault metadata.
+fn resolve_model_dir(args: &[String], vault_root: &Path) -> PathBuf {
+    if let Some(dir) = parse_flag(args, "--model-cache") {
+        return PathBuf::from(dir);
+    }
+    let base = if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Caches"))
+    } else {
+        std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+    };
+    base.map(|b| b.join("lab.home.roseglass").join("models"))
+        .unwrap_or_else(|| vault_root.join(".rose-glass").join("models"))
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -40,10 +93,7 @@ fn main() {
     if args.iter().any(|a| a == "--check") {
         let exists = db_path.exists();
         let (count, last): (i64, i64) = if exists {
-            match Connection::open_with_flags(
-                &db_path,
-                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
-            ) {
+            match db::open_indexed(&db_path, db::Mode::ReadOnly) {
                 Ok(c) => (
                     c.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0)).unwrap_or(0),
                     c.query_row("SELECT COALESCE(MAX(indexed_at),0) FROM notes", [], |r| r.get(0))
@@ -71,26 +121,26 @@ fn main() {
         std::process::exit(if exists { 0 } else { 1 });
     }
 
-    let flags = if allow_write {
-        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI
-    } else {
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI
-    };
-    let mut conn = Connection::open_with_flags(&db_path, flags).unwrap_or_else(|e| {
+    // Open through the canonical constructor so the sidecar's connection matches the app's/tests'
+    // pragmas (FK ON + busy_timeout; WAL/synchronous when read-write) — no hand-rolled flags.
+    let mode = if allow_write { db::Mode::ReadWrite } else { db::Mode::ReadOnly };
+    let mut conn = db::open_indexed(&db_path, mode).unwrap_or_else(|e| {
         eprintln!("rose-glass-mcp: cannot open {}: {e}", db_path.display());
         std::process::exit(1);
     });
-    // Wait out transient SQLITE_BUSY (a WAL checkpoint while the app writes) instead of
-    // failing the query — matches the 5000ms the rest of the codebase uses (db::apply_pragmas).
-    let _ = conn.busy_timeout(std::time::Duration::from_millis(5000));
 
-    // Loud startup line on stderr (stdout is the JSON-RPC channel) so a stale/wrong --vault or an
-    // unexpected read-only/read-write mode is diagnosable from the client's server log.
+    // Resolve the model-cache dir once (used only by the write-mode reembed/semantic_search).
+    let resolved_model_dir = resolve_model_dir(&args, &root);
+    let _ = MODEL_DIR.set(resolved_model_dir.clone());
+
+    // Loud startup line on stderr (stdout is the JSON-RPC channel) so a stale/wrong --vault, an
+    // unexpected mode, or a mismatched model-cache dir (→ a needless re-download) is diagnosable.
     eprintln!(
-        "rose-glass-mcp: vault={} db={} mode={}",
+        "rose-glass-mcp: vault={} db={} mode={} model_cache={}",
         root.display(),
         db_path.display(),
         if allow_write { "read-write" } else { "read-only" },
+        resolved_model_dir.display(),
     );
 
     let stdin = std::io::stdin();
@@ -113,17 +163,23 @@ fn main() {
     }
 }
 
-fn parse_vault(args: &[String]) -> Option<String> {
+/// Value of `--name <value>` or `--name=<value>` from argv, if present.
+fn parse_flag(args: &[String], name: &str) -> Option<String> {
+    let eq = format!("{name}=");
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        if a == "--vault" {
+        if a == name {
             return it.next().cloned();
         }
-        if let Some(v) = a.strip_prefix("--vault=") {
+        if let Some(v) = a.strip_prefix(&eq) {
             return Some(v.to_string());
         }
     }
     None
+}
+
+fn parse_vault(args: &[String]) -> Option<String> {
+    parse_flag(args, "--vault")
 }
 
 /// Dispatch one JSON-RPC message. Returns `None` for notifications (no `id`) and for
@@ -219,6 +275,23 @@ fn tool_defs(allow_write: bool) -> Value {
                 "required": ["title", "summary", "body"]
             }
         }));
+        tools.push(json!({
+            "name": "reembed",
+            "description": "Recompute the vault's note embeddings + clusters (full corpus) so `related` and `semantic_search` work. No-op when already fresh (embedded == note count). Embeddings are a derived cache: opening the desktop app rebuilds the index and clears them, so re-run `reembed` if `related`/`semantic_search` report ready:false. Loads the local model on first use (slow once). --allow-write only.",
+            "inputSchema": { "type": "object", "properties": {} }
+        }));
+        tools.push(json!({
+            "name": "semantic_search",
+            "description": "Free-text semantic search: embed `query` with the local model and rank notes by meaning, not keywords. Use when `search` (keyword/FTS) returns nothing for a conceptual query. Returns ready:false if embeddings have not been computed — run `reembed` first. --allow-write only (the embedding model loads only in write mode; the default read-only sidecar stays model-free).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Free-text query (semantic, not FTS)." },
+                    "k": { "type": "integer", "default": 10, "description": "Max results." }
+                },
+                "required": ["query"]
+            }
+        }));
     }
     Value::Array(tools)
 }
@@ -277,9 +350,13 @@ fn call_tool(
             Err(e) => tool_err(id, &e.to_string()),
         },
         "upsert_note" if allow_write => upsert_note(id, &args, conn, root),
-        // Unadvertised + uncallable without the flag: a hand-rolled client that sends it anyway
-        // gets method-not-found, never a write.
-        "upsert_note" => err(id, -32601, "upsert_note requires --allow-write"),
+        "reembed" if allow_write => reembed(id, conn),
+        "semantic_search" if allow_write => semantic_search(id, &args, &*conn),
+        // Unadvertised + uncallable without the flag: a hand-rolled client that sends one anyway
+        // gets method-not-found, never a write / model load.
+        "upsert_note" | "reembed" | "semantic_search" => {
+            err(id, -32601, &format!("{name} requires --allow-write"))
+        }
         other => err(id, -32602, &format!("Unknown tool: {other}")),
     }
 }
@@ -310,6 +387,92 @@ fn upsert_note(id: Option<Value>, args: &Value, conn: &mut Connection, root: &Pa
         Ok(written) => tool_ok(id, &json!({ "path": written, "indexed": true })),
         Err(e) => tool_err(id, &e),
     }
+}
+
+/// reembed: full-corpus recompute of embeddings + clusters, reusing the app's SINGLE embedding
+/// writer (`cluster::store_clusters`) — no second/incremental write-semantics (ADR-20260624). The
+/// skip-if-fresh guard (embedded == note count, or empty vault) short-circuits BEFORE loading the
+/// ~90MB model, so a no-op call is cheap and never contends with the app. Mirrors
+/// `commands::recompute_clusters` minus the AppState lock dance (the sidecar is single-threaded).
+/// Returns a structured before/after result so the agent (and the server log) can see what happened.
+fn reembed(id: Option<Value>, conn: &mut Connection) -> Value {
+    let (before, notes) = match queries::embedding_freshness(conn, embed::MODEL_NAME) {
+        Ok(v) => v,
+        Err(e) => return tool_err(id, &e.to_string()),
+    };
+    let report = |reembedded: bool, after: i64| {
+        json!({
+            "reembedded": reembedded,
+            "note_count": notes,
+            "embedded_before": before,
+            "embedded_after": after,
+            "model": embed::MODEL_NAME,
+        })
+    };
+    // Nothing to embed, or already fresh → no-op, no model load (skip-if-fresh).
+    if notes == 0 || before == notes {
+        return tool_ok(id, &report(false, before));
+    }
+    // Stale/empty embeddings → full corpus recompute: read_texts → embed (loads the model once) →
+    // store_clusters (the one embedding writer; DELETE-all + reinsert + k-means, in one tx).
+    let rows = match cluster::read_texts(conn) {
+        Ok(r) => r,
+        Err(e) => return tool_err(id, &e.to_string()),
+    };
+    let texts: Vec<&str> = rows.iter().map(|(_, t)| t.as_str()).collect();
+    let vectors = match embed::with_model(model_cache(), model_dir(), |m| embed::embed_texts(m, &texts)) {
+        Ok(v) => v,
+        Err(e) => return tool_err(id, &e),
+    };
+    let items: Vec<(String, Vec<f32>)> = rows.into_iter().map(|(p, _)| p).zip(vectors).collect();
+    if let Err(e) = cluster::store_clusters(conn, &items, cluster::K, embed::MODEL_NAME, now_secs()) {
+        return tool_err(id, &e.to_string());
+    }
+    let after = queries::embedding_freshness(conn, embed::MODEL_NAME)
+        .map(|(e, _)| e)
+        .unwrap_or(before);
+    tool_ok(id, &report(true, after))
+}
+
+/// semantic_search: embed `query` with the local model and rank stored embeddings by cosine
+/// (reuses the pure `knn`). A READ, but the model only loads in --allow-write mode (where `reembed`
+/// already loads it), so the default read-only sidecar stays model-free. `ready:false` (model-free
+/// short-circuit) when no embeddings exist — the agent should run `reembed` first; an empty result
+/// then never reads as "nothing matches". `stale:true` when some notes are unembedded.
+fn semantic_search(id: Option<Value>, args: &Value, conn: &Connection) -> Value {
+    let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+    let k = args.get("k").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+    if query.len() > MAX_QUERY_BYTES {
+        return tool_err(id, &format!("query too long ({} bytes; cap {MAX_QUERY_BYTES})", query.len()));
+    }
+    let (emb, notes) = match queries::embedding_freshness(conn, embed::MODEL_NAME) {
+        Ok(v) => v,
+        Err(e) => return tool_err(id, &e.to_string()),
+    };
+    if emb == 0 {
+        // model-free short-circuit: no embeddings yet → ready:false (run reembed), not "no matches".
+        return tool_ok(
+            id,
+            &json!({
+                "ready": false, "stale": false, "hits": [],
+                "hint": "no embeddings yet — run reembed (under --allow-write) to enable semantic search",
+            }),
+        );
+    }
+    let corpus = match queries::read_embeddings(conn, embed::MODEL_NAME) {
+        Ok(c) => c,
+        Err(e) => return tool_err(id, &e.to_string()),
+    };
+    let stale = emb < notes;
+    let query_vec = match embed::with_model(model_cache(), model_dir(), |m| {
+        embed::embed_texts(m, std::slice::from_ref(&query))
+    }) {
+        Ok(v) => v.into_iter().next().unwrap_or_default(),
+        Err(e) => return tool_err(id, &e),
+    };
+    let scored = knn::knn(&query_vec, &corpus, k.min(MAX_KNN_K), None);
+    let hits = queries::titles_for(conn, scored);
+    tool_ok(id, &json!({ "ready": true, "stale": stale, "hits": hits }))
 }
 
 fn ok(id: Option<Value>, result: Value) -> Value {
@@ -650,5 +813,178 @@ mod tests {
             &mut seeded(), true, root.path(),
         ).unwrap();
         assert_eq!(resp["error"]["code"], -32602, "empty-after-trim summary must be rejected");
+    }
+
+    // ── ADR-20260624: reembed (freshness) + semantic_search, --allow-write only ──────
+
+    #[test]
+    fn reembed_and_semantic_search_hidden_without_allow_write() {
+        let resp = handle_request(
+            &json!({"jsonrpc":"2.0","id":90,"method":"tools/list"}),
+            &mut seeded(), false, std::path::Path::new("."),
+        ).unwrap();
+        let names: Vec<&str> = resp["result"]["tools"].as_array().unwrap().iter()
+            .map(|t| t["name"].as_str().unwrap()).collect();
+        assert!(!names.contains(&"reembed"), "reembed must be hidden in read-only mode");
+        assert!(!names.contains(&"semantic_search"), "semantic_search must be hidden in read-only mode");
+    }
+
+    #[test]
+    fn reembed_and_semantic_search_shown_with_allow_write() {
+        let resp = handle_request(
+            &json!({"jsonrpc":"2.0","id":91,"method":"tools/list"}),
+            &mut seeded(), true, std::path::Path::new("."),
+        ).unwrap();
+        let names: Vec<&str> = resp["result"]["tools"].as_array().unwrap().iter()
+            .map(|t| t["name"].as_str().unwrap()).collect();
+        assert!(names.contains(&"reembed"));
+        assert!(names.contains(&"semantic_search"));
+    }
+
+    #[test]
+    fn reembed_rejected_without_allow_write() {
+        let resp = handle_request(
+            &json!({"jsonrpc":"2.0","id":92,"method":"tools/call",
+                    "params":{"name":"reembed","arguments":{}}}),
+            &mut seeded(), false, std::path::Path::new("."),
+        ).unwrap();
+        assert_eq!(resp["error"]["code"], -32601, "reembed must be method-not-found without --allow-write");
+    }
+
+    #[test]
+    fn reembed_noops_on_empty_vault() {
+        let mut conn = db::open_in_memory().unwrap();
+        db::migrate(&conn).unwrap();
+        let resp = handle_request(
+            &json!({"jsonrpc":"2.0","id":93,"method":"tools/call",
+                    "params":{"name":"reembed","arguments":{}}}),
+            &mut conn, true, std::path::Path::new("."),
+        ).unwrap();
+        assert_eq!(resp["result"]["isError"], false, "resp: {resp}");
+        assert_eq!(resp["result"]["structuredContent"]["reembedded"], false);
+        assert_eq!(resp["result"]["structuredContent"]["note_count"], 0);
+    }
+
+    #[test]
+    fn reembed_skips_when_already_fresh_without_loading_model() {
+        // 1 note + its embedding already present (embedded_count == note_count) → no-op, and
+        // crucially NO model load: model_dir points nowhere, so a load attempt would error. The
+        // skip-if-fresh guard must short-circuit before touching the model.
+        let mut conn = seeded(); // a.md note (+ cluster), no embedding yet
+        conn.execute(
+            "INSERT INTO embeddings (path, vector, model) VALUES ('a.md', ?1, ?2)",
+            rusqlite::params![vec![0u8, 0, 0, 0], desktop_lib::embed::MODEL_NAME],
+        )
+        .unwrap();
+        let resp = handle_request(
+            &json!({"jsonrpc":"2.0","id":94,"method":"tools/call",
+                    "params":{"name":"reembed","arguments":{}}}),
+            &mut conn, true, std::path::Path::new("."),
+        ).unwrap();
+        assert_eq!(resp["result"]["isError"], false, "resp: {resp}");
+        assert_eq!(resp["result"]["structuredContent"]["reembedded"], false, "already fresh → no recompute");
+        assert_eq!(resp["result"]["structuredContent"]["embedded_after"], 1);
+    }
+
+    #[test]
+    fn semantic_search_rejected_without_allow_write() {
+        let resp = handle_request(
+            &json!({"jsonrpc":"2.0","id":95,"method":"tools/call",
+                    "params":{"name":"semantic_search","arguments":{"query":"x"}}}),
+            &mut seeded(), false, std::path::Path::new("."),
+        ).unwrap();
+        assert_eq!(resp["error"]["code"], -32601, "semantic_search must require --allow-write");
+    }
+
+    #[test]
+    fn semantic_search_reports_not_ready_on_empty_embeddings_without_loading_model() {
+        // seeded() has a note but no embeddings → ready:false, model-free (must NOT load the model;
+        // model_dir points nowhere). Mirrors `related`'s ready:false so empty ≠ "nothing matches".
+        let resp = handle_request(
+            &json!({"jsonrpc":"2.0","id":96,"method":"tools/call",
+                    "params":{"name":"semantic_search","arguments":{"query":"anything"}}}),
+            &mut seeded(), true, std::path::Path::new("."),
+        ).unwrap();
+        assert_eq!(resp["result"]["isError"], false, "resp: {resp}");
+        assert_eq!(resp["result"]["structuredContent"]["ready"], false);
+    }
+
+    #[test]
+    fn semantic_search_rejects_overlong_query_before_model_load() {
+        let big = "x".repeat(8193); // > MAX_QUERY_BYTES (8192)
+        let resp = handle_request(
+            &json!({"jsonrpc":"2.0","id":97,"method":"tools/call",
+                    "params":{"name":"semantic_search","arguments":{"query": big}}}),
+            &mut seeded(), true, std::path::Path::new("."),
+        ).unwrap();
+        assert_eq!(resp["result"]["isError"], true, "overlong query must be rejected before the model load");
+    }
+
+    #[test]
+    fn resolve_model_dir_prefers_flag_else_models_subdir() {
+        // An explicit --model-cache wins verbatim.
+        let flagged = resolve_model_dir(
+            &["--model-cache".into(), "C:/custom/dir".into()],
+            Path::new("vault"),
+        );
+        assert_eq!(flagged, PathBuf::from("C:/custom/dir"));
+        // Otherwise the derived path lives in a `models/` dir (OS cache base / identifier, or fallback).
+        let derived = resolve_model_dir(&["--vault".into(), "v".into()], Path::new("vault"));
+        assert_eq!(derived.file_name().and_then(|s| s.to_str()), Some("models"));
+    }
+
+    /// Real-model E2E: reembed actually embeds + stores, the second call no-ops (skip-if-fresh),
+    /// and semantic_search ranks a CONCEPTUAL query with no keyword overlap onto the right notes —
+    /// the zero-FTS-hit hole the feature exists to close. #[ignore]d (uses the ~90MB ONNX model,
+    /// cached after first run); run with `--ignored`. Reuses the temp cache the other ignored
+    /// embed tests use.
+    #[test]
+    #[ignore = "uses the real ONNX model; run with --ignored"]
+    fn reembed_then_semantic_search_end_to_end_with_real_model() {
+        let _ = MODEL_DIR.set(std::env::temp_dir().join("rg-fastembed-cache"));
+        let mut conn = db::open_in_memory().unwrap();
+        db::migrate(&conn).unwrap();
+        for (p, t, b) in [
+            ("cooking.md", "Cooking Pasta", "boil water add salt cook the pasta al dente then drain"),
+            ("sauce.md", "Tomato Sauce", "simmer tomatoes garlic basil and olive oil into a pasta sauce"),
+            ("holes.md", "Black Holes", "a black hole bends spacetime so light cannot escape it"),
+            ("stars.md", "Neutron Stars", "a neutron star is the dense collapsed core of a massive star"),
+        ] {
+            conn.execute(
+                "INSERT INTO notes (path,title,content_hash,mtime,word_count,indexed_at) VALUES (?1,?2,'h',0,1,0)",
+                rusqlite::params![p, t],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO notes_fts (path,title,body) VALUES (?1,?2,?3)",
+                rusqlite::params![p, t, b],
+            )
+            .unwrap();
+        }
+        let call = |conn: &mut Connection, args: Value| {
+            handle_request(
+                &json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":args}),
+                conn,
+                true,
+                Path::new("."),
+            )
+            .unwrap()
+        };
+        // reembed embeds all 4
+        let r = call(&mut conn, json!({"name":"reembed","arguments":{}}));
+        assert_eq!(r["result"]["structuredContent"]["reembedded"], true, "resp {r}");
+        assert_eq!(r["result"]["structuredContent"]["embedded_after"], 4);
+        // second call is a skip-if-fresh no-op
+        let r2 = call(&mut conn, json!({"name":"reembed","arguments":{}}));
+        assert_eq!(r2["result"]["structuredContent"]["reembedded"], false, "already fresh");
+        // a conceptual query sharing NO keyword with the notes still ranks a cooking note first
+        let s = call(&mut conn, json!({"name":"semantic_search","arguments":{"query":"recipe for dinner","k":2}}));
+        assert_eq!(s["result"]["structuredContent"]["ready"], true, "resp {s}");
+        let hits = s["result"]["structuredContent"]["hits"].as_array().unwrap();
+        let top = hits.first().and_then(|h| h["path"].as_str()).unwrap_or("");
+        assert!(
+            top == "cooking.md" || top == "sauce.md",
+            "‘recipe for dinner’ (no shared keyword) should rank a cooking note top, got {top}"
+        );
     }
 }
