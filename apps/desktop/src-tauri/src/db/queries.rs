@@ -490,6 +490,50 @@ pub fn get_graph_payload(conn: &Connection) -> rusqlite::Result<GraphPayload> {
     Ok(GraphPayload { nodes, edges, cluster_count })
 }
 
+#[derive(Serialize)]
+pub struct ManifestEntry {
+    pub path: String,
+    pub title: String,
+    pub summary: Option<String>,
+    pub status: Option<String>,
+    pub tags: Vec<String>,
+    pub summary_present: bool,
+}
+
+/// One row per note: path/title + summary/status pulled out of the frontmatter JSON, plus the
+/// note's tags. The whole-vault triage surface for the agent (replaces grepping). A note with
+/// no/empty frontmatter `summary` is flagged (summary_present=false) so the agent can backfill.
+/// ponytail: re-prepares the tags statement per row (N+1) — fine at personal-vault scale; batch
+/// into one `tags` scan + group if a huge vault ever makes this manifest call slow.
+pub fn manifest(conn: &Connection) -> rusqlite::Result<Vec<ManifestEntry>> {
+    let mut stmt = conn.prepare("SELECT path, title, frontmatter FROM notes ORDER BY path")?;
+    let base: Vec<(String, String, Option<String>)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<String>>(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut out = Vec::with_capacity(base.len());
+    for (path, title, fm_json) in base {
+        let fm: Option<serde_json::Value> = fm_json.and_then(|s| serde_json::from_str(&s).ok());
+        let field = |k: &str| -> Option<String> {
+            fm.as_ref()
+                .and_then(|v| v.get(k))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .filter(|s| !s.trim().is_empty())
+        };
+        let summary = field("summary");
+        let status = field("status");
+        let tags: Vec<String> = {
+            let mut ts = conn.prepare("SELECT tag FROM tags WHERE path=?1 ORDER BY tag")?;
+            let rows = ts.query_map(params![path], |r| r.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        let summary_present = summary.is_some();
+        out.push(ManifestEntry { path, title, summary, status, tags, summary_present });
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod semantic_tests {
     use super::*;
@@ -506,6 +550,30 @@ mod semantic_tests {
             params![path, vec_to_blob(vec), model],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn manifest_lists_notes_and_flags_missing_summary() {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO notes (path,title,frontmatter,content_hash,mtime,word_count,indexed_at)
+             VALUES ('a.md','A','{\"summary\":\"hi\",\"status\":\"active\"}','h',0,1,0)",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO notes (path,title,content_hash,mtime,word_count,indexed_at)
+             VALUES ('b.md','B','h',0,1,0)",
+            [],
+        ).unwrap();
+        let m = manifest(&conn).unwrap();
+        assert_eq!(m.len(), 2);
+        let a = m.iter().find(|e| e.path == "a.md").unwrap();
+        assert_eq!(a.summary.as_deref(), Some("hi"));
+        assert_eq!(a.status.as_deref(), Some("active"));
+        assert!(a.summary_present);
+        let b = m.iter().find(|e| e.path == "b.md").unwrap();
+        assert!(!b.summary_present, "b.md has no frontmatter summary");
     }
 
     #[test]

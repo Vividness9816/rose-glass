@@ -131,6 +131,11 @@ fn tool_defs(allow_write: bool) -> Value {
                 "required": ["path"]
             }
         }),
+        json!({
+            "name": "manifest",
+            "description": "List every note (path, title, summary, status, tags). One call to triage the whole vault instead of grepping. Notes missing a summary are flagged (summary_present=false).",
+            "inputSchema": { "type": "object", "properties": {} }
+        }),
     ];
     // The write tool is advertised ONLY under --allow-write, so a default (read-only) server is
     // provably non-mutating: a client that never sees upsert_note cannot call it.
@@ -191,6 +196,10 @@ fn call_tool(
                 Err(e) => tool_err(id, &e.to_string()),
             }
         }
+        "manifest" => match queries::manifest(&*conn) {
+            Ok(entries) => tool_ok(id, &entries),
+            Err(e) => tool_err(id, &e.to_string()),
+        },
         "upsert_note" if allow_write => upsert_note(id, &args, conn, root),
         // Unadvertised + uncallable without the flag: a hand-rolled client that sends it anyway
         // gets method-not-found, never a write.
@@ -439,6 +448,17 @@ mod tests {
         assert_eq!(resp["result"]["isError"], false, "resp: {resp}");
         assert_eq!(resp["result"]["structuredContent"]["path"], "inbox/test-note.md");
         assert!(root.path().join("inbox/test-note.md").exists());
+    }
+
+    #[test]
+    fn manifest_tool_lists_notes() {
+        let resp = handle_request(
+            &json!({"jsonrpc":"2.0","id":50,"method":"tools/call",
+                    "params":{"name":"manifest","arguments":{}}}),
+            &mut seeded(), false, std::path::Path::new("."),
+        ).unwrap();
+        assert_eq!(resp["result"]["isError"], false);
+        assert_eq!(resp["result"]["structuredContent"][0]["path"], "a.md");
     }
 
     #[test]
