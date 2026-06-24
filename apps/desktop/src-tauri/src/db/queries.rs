@@ -82,6 +82,9 @@ pub struct GraphEdgeMeta {
 pub struct GraphPayload {
     pub nodes: Vec<GraphNodeMeta>,
     pub edges: Vec<GraphEdgeMeta>,
+    /// Distinct cluster count for the status-bar "N clusters". 0 until recompute_clusters runs
+    /// (clear_all_derived empties `clusters` on every rebuild, so it's 0 right after open).
+    pub cluster_count: i64,
 }
 
 #[derive(Serialize)]
@@ -481,7 +484,10 @@ pub fn get_graph_payload(conn: &Connection) -> rusqlite::Result<GraphPayload> {
         rows.collect::<rusqlite::Result<_>>()?
     };
 
-    Ok(GraphPayload { nodes, edges })
+    let cluster_count: i64 =
+        conn.query_row("SELECT COUNT(DISTINCT cluster_id) FROM clusters", [], |r| r.get(0))?;
+
+    Ok(GraphPayload { nodes, edges, cluster_count })
 }
 
 #[cfg(test)]
@@ -500,6 +506,29 @@ mod semantic_tests {
             params![path, vec_to_blob(vec), model],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn graph_payload_reports_distinct_cluster_count() {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        // empty clusters table → 0 (the post-open state that used to be hardcoded)
+        assert_eq!(get_graph_payload(&conn).unwrap().cluster_count, 0);
+        for (p, cid) in [("a.md", 0), ("b.md", 0), ("c.md", 1)] {
+            conn.execute(
+                "INSERT INTO notes (path,title,content_hash,mtime,word_count,indexed_at) VALUES (?1,'T','h',0,1,0)",
+                params![p],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO clusters (path,cluster_id,computed_at) VALUES (?1,?2,0)",
+                params![p, cid],
+            )
+            .unwrap();
+        }
+        let payload = get_graph_payload(&conn).unwrap();
+        assert_eq!(payload.cluster_count, 2, "two distinct cluster ids");
+        assert_eq!(payload.nodes.len(), 3);
     }
 
     #[test]
