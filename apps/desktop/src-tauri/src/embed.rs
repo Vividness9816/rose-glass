@@ -91,6 +91,17 @@ pub fn reset_model(cache: &Mutex<ModelCache>) {
     *cache.lock().unwrap_or_else(|e| e.into_inner()) = ModelCache::Uninit;
 }
 
+/// True if the embedding model appears already downloaded under `cache_dir` (the dir exists
+/// and is non-empty). GATES auto-clustering on vault-open: we re-cluster on open only when the
+/// model is already cached, so opening a vault never triggers the ~90MB fetch.
+/// ponytail: a partial/interrupted download can leave a non-empty dir → a false "present"; the
+/// auto path swallows the resulting error and the manual Clusters button + Retry recover.
+pub fn model_cache_present(cache_dir: &Path) -> bool {
+    std::fs::read_dir(cache_dir)
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,6 +124,18 @@ mod tests {
             *cache.lock().unwrap_or_else(|e| e.into_inner()),
             ModelCache::Uninit
         ));
+    }
+
+    #[test]
+    fn model_cache_present_detects_nonempty_dir() {
+        let base = std::env::temp_dir().join(format!("rg-cache-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(!model_cache_present(&base), "missing dir → not present");
+        std::fs::create_dir_all(&base).unwrap();
+        assert!(!model_cache_present(&base), "empty dir → not present");
+        std::fs::write(base.join("model.onnx"), b"x").unwrap();
+        assert!(model_cache_present(&base), "dir with a file → present");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

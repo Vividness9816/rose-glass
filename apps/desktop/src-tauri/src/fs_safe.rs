@@ -2,6 +2,7 @@
 //! forward-slash paths; we GUARANTEE the resolved absolute path stays inside the
 //! vault root (rejects absolute, `..`, and symlinked-dir escapes).
 
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 pub fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
@@ -44,6 +45,24 @@ pub fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
         return Err("target is a directory, not a file".into());
     }
     Ok(check)
+}
+
+/// Crash-safe write: temp file in the SAME directory → fsync → atomic rename over `abs`.
+/// A concurrent reader (or the file watcher) therefore only ever sees a complete file,
+/// never a half-written one. The parent dir must exist. Mirrors the inline dance in
+/// `commands::save_note_file` so the agent write path and the editor save path are identical.
+pub fn atomic_write(abs: &Path, content: &str) -> std::io::Result<()> {
+    let dir = abs.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no parent dir")
+    })?;
+    let mut tmp = tempfile::Builder::new()
+        .prefix(".rg-")
+        .suffix(".tmp")
+        .tempfile_in(dir)?;
+    tmp.write_all(content.as_bytes())?;
+    tmp.as_file().sync_all()?; // fsync data before the atomic rename (crash-durable)
+    tmp.persist(abs).map_err(|e| e.error)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -93,5 +112,23 @@ mod tests {
         let base = root.file_name().unwrap().to_str().unwrap().to_string();
         // a sibling dir sharing a string prefix must not pass starts_with
         assert!(safe_join(root, &format!("../{base}-evil/x.md")).is_err());
+    }
+
+    #[test]
+    fn atomic_write_creates_and_overwrites() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("note.md");
+        atomic_write(&f, "hello").unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "hello");
+        // overwrite in place
+        atomic_write(&f, "world").unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "world");
+        // no leftover temp files in the dir
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp file leaked: {leftovers:?}");
     }
 }

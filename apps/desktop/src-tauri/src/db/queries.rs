@@ -82,6 +82,9 @@ pub struct GraphEdgeMeta {
 pub struct GraphPayload {
     pub nodes: Vec<GraphNodeMeta>,
     pub edges: Vec<GraphEdgeMeta>,
+    /// Distinct cluster count for the status-bar "N clusters". 0 until recompute_clusters runs
+    /// (clear_all_derived empties `clusters` on every rebuild, so it's 0 right after open).
+    pub cluster_count: i64,
 }
 
 #[derive(Serialize)]
@@ -481,7 +484,121 @@ pub fn get_graph_payload(conn: &Connection) -> rusqlite::Result<GraphPayload> {
         rows.collect::<rusqlite::Result<_>>()?
     };
 
-    Ok(GraphPayload { nodes, edges })
+    let cluster_count: i64 =
+        conn.query_row("SELECT COUNT(DISTINCT cluster_id) FROM clusters", [], |r| r.get(0))?;
+
+    Ok(GraphPayload { nodes, edges, cluster_count })
+}
+
+#[derive(Serialize)]
+pub struct ManifestEntry {
+    pub path: String,
+    pub title: String,
+    pub summary: Option<String>,
+    pub status: Option<String>,
+    pub tags: Vec<String>,
+    pub summary_present: bool,
+}
+
+/// One row per note: path/title + summary/status pulled out of the frontmatter JSON, plus the
+/// note's tags. The whole-vault triage surface for the agent (replaces grepping). A note with
+/// no/empty frontmatter `summary` is flagged (summary_present=false) so the agent can backfill.
+/// ponytail: re-prepares the tags statement per row (N+1) — fine at personal-vault scale; batch
+/// into one `tags` scan + group if a huge vault ever makes this manifest call slow.
+pub fn manifest(conn: &Connection) -> rusqlite::Result<Vec<ManifestEntry>> {
+    let mut stmt = conn.prepare("SELECT path, title, frontmatter FROM notes ORDER BY path")?;
+    let base: Vec<(String, String, Option<String>)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<String>>(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut out = Vec::with_capacity(base.len());
+    for (path, title, fm_json) in base {
+        let fm: Option<serde_json::Value> = fm_json.and_then(|s| serde_json::from_str(&s).ok());
+        let field = |k: &str| -> Option<String> {
+            fm.as_ref()
+                .and_then(|v| v.get(k))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .filter(|s| !s.trim().is_empty())
+        };
+        let summary = field("summary");
+        let status = field("status");
+        let tags: Vec<String> = {
+            let mut ts = conn.prepare("SELECT tag FROM tags WHERE path=?1 ORDER BY tag")?;
+            let rows = ts.query_map(params![path], |r| r.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        let summary_present = summary.is_some();
+        out.push(ManifestEntry { path, title, summary, status, tags, summary_present });
+    }
+    Ok(out)
+}
+
+#[derive(Serialize)]
+pub struct RelatedResult {
+    pub ready: bool,
+    pub neighbors: Vec<SemanticHit>,
+}
+
+/// Notes most similar to `path` by cosine over STORED embeddings — MODEL-FREE (the note's own
+/// vector is already in `embeddings`, so no ONNX load). Mirrors `commands::related_notes` without
+/// its lock/telemetry wrapper. `ready=false` when no embeddings exist yet (the app hasn't run the
+/// Clusters recompute), so an empty list reads as "not ready", NOT "no neighbours". Self-excluded.
+pub fn related(conn: &Connection, path: &str, k: usize) -> rusqlite::Result<RelatedResult> {
+    let corpus = read_embeddings(conn, crate::embed::MODEL_NAME)?;
+    if corpus.is_empty() {
+        return Ok(RelatedResult { ready: false, neighbors: vec![] });
+    }
+    // The note may not be embedded yet (added since the last recompute): ready, but no neighbours.
+    let Some((_, query_vec)) = corpus.iter().find(|(p, _)| p == path).cloned() else {
+        return Ok(RelatedResult { ready: true, neighbors: vec![] });
+    };
+    let scored = crate::knn::knn(&query_vec, &corpus, k, Some(path));
+    Ok(RelatedResult { ready: true, neighbors: titles_for(conn, scored) })
+}
+
+#[derive(Serialize)]
+pub struct MaintenanceReport {
+    pub note_count: i64,
+    pub embedded_count: i64,
+    pub embeddings_stale: bool,
+    pub missing_summary: Vec<String>,
+    pub orphans: Vec<String>,
+}
+
+/// Read-only upkeep report: note vs (current-model) embedding counts (stale if they differ),
+/// notes with no frontmatter summary, and orphans (no resolved outbound AND no inbound links).
+/// Does NOT re-embed (that needs the model, app-side) — it only surfaces what to fix, per the
+/// ADR's on-demand-not-a-session-hook decision. `embedded_count` is MODEL-FILTERED (reuses
+/// embedding_freshness) so the stale flag reflects the corpus `related`/`search` actually see.
+pub fn maintenance_report(conn: &Connection) -> rusqlite::Result<MaintenanceReport> {
+    let (embedded_count, note_count) = embedding_freshness(conn, crate::embed::MODEL_NAME)?;
+    let missing_summary: Vec<String> = manifest(conn)?
+        .into_iter()
+        .filter(|e| !e.summary_present)
+        .map(|e| e.path)
+        .collect();
+    let orphans: Vec<String> = {
+        // Exclude SELF-links from both clauses: the resolver legitimately emits dst_path == src_path
+        // for an intra-note link (e.g. `[[#heading]]` or `[[self]]`), which is NOT a real graph
+        // connection — without the `!= n.path` guards a note whose only link is to itself would be
+        // hidden from the orphan list, defeating the report's purpose.
+        let mut stmt = conn.prepare(
+            "SELECT n.path FROM notes n
+             WHERE NOT EXISTS (SELECT 1 FROM links l WHERE l.src_path = n.path AND l.dst_path IS NOT NULL AND l.dst_path <> n.path)
+               AND NOT EXISTS (SELECT 1 FROM links l WHERE l.dst_path = n.path AND l.src_path <> n.path)
+             ORDER BY n.path",
+        )?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    Ok(MaintenanceReport {
+        note_count,
+        embedded_count,
+        embeddings_stale: embedded_count != note_count,
+        missing_summary,
+        orphans,
+    })
 }
 
 #[cfg(test)]
@@ -500,6 +617,108 @@ mod semantic_tests {
             params![path, vec_to_blob(vec), model],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn manifest_lists_notes_and_flags_missing_summary() {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO notes (path,title,frontmatter,content_hash,mtime,word_count,indexed_at)
+             VALUES ('a.md','A','{\"summary\":\"hi\",\"status\":\"active\"}','h',0,1,0)",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO notes (path,title,content_hash,mtime,word_count,indexed_at)
+             VALUES ('b.md','B','h',0,1,0)",
+            [],
+        ).unwrap();
+        let m = manifest(&conn).unwrap();
+        assert_eq!(m.len(), 2);
+        let a = m.iter().find(|e| e.path == "a.md").unwrap();
+        assert_eq!(a.summary.as_deref(), Some("hi"));
+        assert_eq!(a.status.as_deref(), Some("active"));
+        assert!(a.summary_present);
+        let b = m.iter().find(|e| e.path == "b.md").unwrap();
+        assert!(!b.summary_present, "b.md has no frontmatter summary");
+    }
+
+    #[test]
+    fn related_is_not_ready_with_no_embeddings() {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO notes (path,title,content_hash,mtime,word_count,indexed_at) VALUES ('a.md','A','h',0,1,0)",
+            [],
+        ).unwrap();
+        let r = related(&conn, "a.md", 5).unwrap();
+        assert!(!r.ready, "no embeddings → not ready");
+        assert!(r.neighbors.is_empty());
+    }
+
+    #[test]
+    fn related_ranks_nearest_excluding_self() {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        seed(&conn, "a.md", "A", &[1.0, 0.0, 0.0], MODEL_NAME);
+        seed(&conn, "b.md", "B", &[0.9, 0.1, 0.0], MODEL_NAME); // near a
+        seed(&conn, "c.md", "C", &[0.0, 0.0, 1.0], MODEL_NAME); // far
+        let r = related(&conn, "a.md", 1).unwrap();
+        assert!(r.ready);
+        assert_eq!(r.neighbors.len(), 1);
+        assert_eq!(r.neighbors[0].path, "b.md", "b is nearest; self excluded");
+    }
+
+    #[test]
+    fn maintenance_report_flags_orphans_and_missing_summary() {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        // a.md: has a summary + an outgoing resolved link to b.md (not an orphan)
+        conn.execute("INSERT INTO notes (path,title,frontmatter,content_hash,mtime,word_count,indexed_at) VALUES ('a.md','A','{\"summary\":\"s\"}','h',0,1,0)", []).unwrap();
+        // b.md: no summary, but an inbound link from a.md (not an orphan)
+        conn.execute("INSERT INTO notes (path,title,content_hash,mtime,word_count,indexed_at) VALUES ('b.md','B','h',0,1,0)", []).unwrap();
+        conn.execute("INSERT INTO links (src_path,dst_path,dst_raw,link_type) VALUES ('a.md','b.md','b','wikilink')", []).unwrap();
+        let r = maintenance_report(&conn).unwrap();
+        assert_eq!(r.note_count, 2);
+        assert!(r.embeddings_stale, "0 embeddings for 2 notes");
+        assert!(r.missing_summary.contains(&"b.md".to_string()));
+        assert!(!r.orphans.contains(&"b.md".to_string()), "b.md has an inbound link");
+    }
+
+    #[test]
+    fn maintenance_report_counts_a_self_linking_note_as_an_orphan() {
+        // A note whose ONLY link is a resolved self-link ([[#heading]] / [[self]]) has no real
+        // graph connections — it must still be reported as an orphan (regression: self-links were
+        // counted as connections, hiding exactly the disconnected notes the report exists to find).
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        conn.execute("INSERT INTO notes (path,title,content_hash,mtime,word_count,indexed_at) VALUES ('x.md','X','h',0,1,0)", []).unwrap();
+        conn.execute("INSERT INTO links (src_path,dst_path,dst_raw,link_type) VALUES ('x.md','x.md','#heading','wikilink')", []).unwrap();
+        let r = maintenance_report(&conn).unwrap();
+        assert!(r.orphans.contains(&"x.md".to_string()), "a self-link is not a real connection");
+    }
+
+    #[test]
+    fn graph_payload_reports_distinct_cluster_count() {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        // empty clusters table → 0 (the post-open state that used to be hardcoded)
+        assert_eq!(get_graph_payload(&conn).unwrap().cluster_count, 0);
+        for (p, cid) in [("a.md", 0), ("b.md", 0), ("c.md", 1)] {
+            conn.execute(
+                "INSERT INTO notes (path,title,content_hash,mtime,word_count,indexed_at) VALUES (?1,'T','h',0,1,0)",
+                params![p],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO clusters (path,cluster_id,computed_at) VALUES (?1,?2,0)",
+                params![p, cid],
+            )
+            .unwrap();
+        }
+        let payload = get_graph_payload(&conn).unwrap();
+        assert_eq!(payload.cluster_count, 2, "two distinct cluster ids");
+        assert_eq!(payload.nodes.len(), 3);
     }
 
     #[test]

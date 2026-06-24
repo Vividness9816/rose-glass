@@ -74,6 +74,8 @@ export interface GraphEdgeMeta {
 export interface GraphPayload {
   nodes: GraphNodeMeta[];
   edges: GraphEdgeMeta[];
+  /** Distinct cluster count for the status bar; 0 until clustering runs. */
+  cluster_count: number;
 }
 
 export const openVault = (path: string) => invoke<OpenVaultResult>('open_vault', { path });
@@ -84,8 +86,11 @@ export const getTags = () => invoke<TagCount[]>('get_tags');
 export const getGraphPayload = () => invoke<GraphPayload>('get_graph_payload');
 export const reindex = () => invoke<OpenVaultResult>('reindex');
 /** Embed every note (local ONNX) + k-means into the clusters table; returns the cluster count.
- *  Slow on first run (downloads the model). Emits index:rebuilt so the graph recolours. */
-export const recomputeClusters = () => invoke<number>('recompute_clusters');
+ *  Slow on first run (downloads the model). Emits index:rebuilt so the graph recolours.
+ *  `auto=true` (fired on vault-open) no-ops unless the model is already cached, so opening a
+ *  vault never triggers the ~90MB download; the Clusters button passes `auto=false`. */
+export const recomputeClusters = (auto = false) =>
+  invoke<number>('recompute_clusters', { auto });
 
 /** On-disk byte size of a vault file (Properties popover). Vault-relative + safe_join-guarded. */
 export const fileSize = (path: string) => invoke<number>('file_size', { path });

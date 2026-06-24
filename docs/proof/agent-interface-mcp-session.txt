@@ -1,0 +1,58 @@
+Rose Glass — agent-interface MCP sidecar, end-to-end stdio proof
+================================================================
+Date: 2026-06-23   Branch: fix/clusters-wiring-2026-06-23   Bin: rose-glass-mcp (v0.3.0)
+
+What this proves: a real newline-delimited JSON-RPC 2.0 (MCP 2025-06-18) session over the
+sidecar's stdin/stdout, in --allow-write mode, exercising the WRITE path end-to-end —
+upsert_note lands a markdown FILE on disk, the SQLite row is DERIVED, and the new note is
+immediately findable by search / retrievable by get_note / listed by manifest. Read-only-by-
+default, the inbox-only write confinement, and per-tool dispatch are additionally covered by
+22 `cargo test --bin rose-glass-mcp` unit tests on a real on-disk DB.
+
+Reproduce
+---------
+1. Build an index for a vault (open the vault once in the app, OR — as used here — run a
+   throwaway `cargo run --example seed_index -- <vault>` that calls
+   desktop_lib::{db::open_db, db::migrate, indexer::pipeline::full_rebuild}).
+   Seed vault: one note notes/welcome.md (frontmatter title/summary/tags + a [[Pasta Recipe]] link).
+2. Pipe the requests below to the sidecar:
+     cargo run --bin rose-glass-mcp -- --allow-write --vault <vault> < requests.jsonl
+
+Startup line (stderr; stdout is the JSON-RPC channel)
+-----------------------------------------------------
+rose-glass-mcp: vault=\\?\C:\...\agentvault db=\\?\C:\...\agentvault\.rose-glass\index.db mode=read-write
+
+Requests (stdin, newline-delimited)
+-----------------------------------
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list"}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"upsert_note","arguments":{"title":"Pasta Recipe","summary":"how to cook pasta","body":"Boil salted water, add pasta, cook 9 minutes.","tags":["cooking"]}}}
+{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"search","arguments":{"query":"pasta"}}}
+{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_note","arguments":{"path":"inbox/pasta-recipe.md"}}}
+{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"manifest","arguments":{}}}
+{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"related","arguments":{"path":"inbox/pasta-recipe.md"}}}
+
+Responses (stdout)
+------------------
+id 1  initialize  -> protocolVersion 2025-06-18, serverInfo rose-glass 0.3.0
+id 2  tools/list  -> 7 tools: search, get_semantic_clusters, get_note, manifest, related,
+                     maintenance_report, AND upsert_note (present because --allow-write).
+id 3  upsert_note -> isError:false, structuredContent {"indexed":true,"path":"inbox/pasta-recipe.md"}
+id 4  search      -> isError:false, structuredContent[0].path == "inbox/pasta-recipe.md"
+                     (the JUST-WRITTEN note, ranked above notes/welcome.md) — write is immediately
+                     searchable, proving file-first + derived-row over the real pipe.
+id 5  get_note    -> isError:false, frontmatter {"summary":"how to cook pasta","tags":["cooking"],
+                     "title":"Pasta Recipe"} — serde_yaml_ng frontmatter round-trips through the parser.
+id 6  manifest    -> isError:false, both notes listed, summary_present:true for each.
+id 7  related     -> isError:false, {"ready":false,"neighbors":[]} (no embeddings computed).
+
+On-disk file written by id 3 (inbox/pasta-recipe.md)
+----------------------------------------------------
+---
+title: Pasta Recipe
+summary: how to cook pasta
+tags:
+- cooking
+---
+
+Boil salted water, add pasta, cook 9 minutes.

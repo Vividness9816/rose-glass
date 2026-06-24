@@ -2,10 +2,11 @@ mod activity;
 mod cluster;
 mod commands;
 mod installer;
+pub mod capture; // the single confined agent write path (file-first, sync-indexed — ADR-20260623)
 pub mod db; // exposed for the rose-glass-mcp sidecar bin (read surface — §14)
 mod embed;
-mod fs_safe;
-mod indexer;
+pub mod fs_safe; // exposed for the rose-glass-mcp sidecar's confined write path (ADR-20260623)
+pub mod indexer; // exposed so the sidecar can self-index via pipeline::incremental (app-closed case)
 mod knn;
 mod state;
 mod terminal;

@@ -66,6 +66,37 @@ brainstorm→spec→plan→build per leg; leg 4 via `/council` (**ADR-20260619-r
   rendering a guide through the reading view (deviation from a bundled help.pdf — PdfView is
   vault-relative only).
 
+## Agent interface (MCP) shipped (ADR-20260623) — branch `fix/clusters-wiring-2026-06-23`, NOT merged
+Wires Rose Glass as the agent-facing KB: Claude Code navigates + captures via the **read-only
+`rose-glass-mcp` stdio sidecar** instead of ripgrep + sequential file reads (works app-closed — the
+client spawns it). Built discovery (`docs/agent-interface-findings.md`) → `/council` (ADR-20260623) →
+phased plan (`docs/superpowers/plans/2026-06-23-rose-glass-agent-interface.md`) → TDD execution: 6
+phases, 14 atomic commits, **two 3-lens adversarial reviews** (Phase 1 + Phases 2-5), all fixes applied.
+- **Read tools (always):** `search` · `get_note` · `manifest` (whole-vault triage, flags missing
+  summary) · `related` (model-free KNN, `ready:false` when un-embedded) · `get_semantic_clusters` ·
+  `maintenance_report` (orphans/stale/missing-summary, self-link-aware).
+- **Write (`--allow-write` only):** `upsert_note` — mandatory summary, **inbox-only + markdown-only**
+  confinement, dedup-on-create (never clobbers), file-first so the row is **derived** (A3 holds). The
+  default invocation opens the DB `READ_ONLY` and never advertises the tool → read-only is provable.
+- **Lifecycle:** startup mode log + `--check` doctor (exit 0/1/2). Client config via `.mcp.json`
+  (`docs/agent-interface.md`). No network, no model in the sidecar (free-text-semantic-over-MCP +
+  RRF fusion deferred per ADR).
+- **One confined write fn** `capture::write_note` (file → atomic temp+fsync+rename →
+  `pipeline::incremental`); `capture::{build_markdown` (serde_yaml_ng — escapes/round-trips frontmatter),
+  `derive_rel, dedup_rel}`; `queries::{manifest, related, maintenance_report}`; the `rose-glass-mcp`
+  `--allow-write` gate + dispatch.
+- **The reviews caught real bugs.** R1: backslash paths escaped `should_skip` and `create_dir_all` ran
+  before validation (dirs created OUTSIDE the vault, probe-confirmed) + hand-rolled YAML silently
+  dropped frontmatter on ordinary values. R2 (HIGH): `upsert_note path=` accepted any extension/location
+  → arbitrary in-vault file overwrite + A3 divergence (incremental indexes non-md, full_rebuild skips it)
+  → fixed by inbox-only + markdown-only enforcement inside `write_note`. Plus a self-link orphan-SQL fix.
+- **Gates green:** `cargo test --lib` **96/96** + `--bin rose-glass-mcp` **22/22** · clippy diff-clean ·
+  vitest **119** · tsc 0 · vite build 0. **Proven E2E over real stdio:**
+  `docs/proof/agent-interface-mcp-session.txt` (a JSON-RPC session: `upsert_note` → the new note is
+  immediately surfaced by `search`/`get_note`/`manifest` through the pipe). README + `docs/agent-interface.md` added.
+- **Deferred (documented):** `manifest` result cap (a LIMIT would silently truncate a whole-vault triage
+  list); free-text-semantic-over-MCP + RRF (needs the model in the sidecar — ADR). Commits `d169f60..700e988`.
+
 ## Phase 12 — §20 acceptance gate PASSED → v1.0 (2026-06-18)
 **All 11 §20 rows ✅ proven.** A3/A4/A7/A9/A10 were headless/test-proven earlier; the 6
 live-window rows (A1/A2/A5/A6/A8/A11) are now confirmed by the **user's live walkthrough**

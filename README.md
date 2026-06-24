@@ -56,6 +56,18 @@ pnpm test         # vitest
 pnpm build        # tsc && vite build
 ```
 
+## Agent interface (MCP)
+
+Rose Glass ships a stdio MCP sidecar (`rose-glass-mcp`) so Claude Code can navigate and capture
+into the vault through tools instead of ripgrep + file reads — it works even when the app is closed
+(the client spawns it). Read tools: `search`, `get_note`, `manifest` (whole-vault triage),
+`related` (model-free semantic neighbours), `get_semantic_clusters`, `maintenance_report`. Under an
+opt-in `--allow-write` flag it also gains `upsert_note` — the one write path, confined to
+`inbox/*.md`, file-first so the SQLite row stays derived (A3 holds). Read-only by default is
+provable: without the flag the DB opens read-only and the write tool is never advertised. See
+**[docs/agent-interface.md](docs/agent-interface.md)** for the tool list, the `--check` doctor, and
+a copy-pasteable `.mcp.json`.
+
 ## Design contract
 
 The single visual source of truth is **[docs/design-reference.html](docs/design-reference.html)** —

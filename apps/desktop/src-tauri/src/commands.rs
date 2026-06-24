@@ -280,8 +280,15 @@ pub async fn resolve_link(
 pub async fn recompute_clusters(
     app: AppHandle,
     state: State<'_, AppState>,
+    auto: bool,
 ) -> Result<usize, IpcError> {
     let cache = app.path().app_cache_dir()?.join("models");
+    // Auto path (fired on vault-open to re-organize after clear_all_derived wiped clusters):
+    // only run if the model is already downloaded — never trigger the ~90MB fetch on open.
+    // The manual Clusters button (auto=false) downloads the model the first time.
+    if auto && !crate::embed::model_cache_present(&cache) {
+        return Ok(0);
+    }
     std::fs::create_dir_all(&cache)?;
 
     let rows = {

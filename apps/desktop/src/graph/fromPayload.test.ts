@@ -10,6 +10,7 @@ describe('payloadToGraphData', () => {
         { path: 'b.md', title: '', cluster: null, link_count: 0 },
       ],
       edges: [{ src: 'a.md', dst: 'b.md' }],
+      cluster_count: 0,
     };
     const g = payloadToGraphData(p);
     expect(g.nodes).toHaveLength(2);
@@ -22,6 +23,7 @@ describe('payloadToGraphData', () => {
     const p: GraphPayload = {
       nodes: [{ path: 'a.md', title: 'A', cluster: null, link_count: 1 }],
       edges: [{ src: 'a.md', dst: 'ghost.md' }],
+      cluster_count: 0,
     };
     expect(payloadToGraphData(p).edges).toHaveLength(0);
   });
@@ -33,7 +35,7 @@ describe('payloadToGraphData', () => {
       cluster: null,
       link_count: 0,
     }));
-    const g = payloadToGraphData({ nodes, edges: [] });
+    const g = payloadToGraphData({ nodes, edges: [], cluster_count: 0 });
     g.nodes.forEach((n) => {
       expect(n.cluster).toBeGreaterThanOrEqual(0);
       expect(n.cluster).toBeLessThan(4);

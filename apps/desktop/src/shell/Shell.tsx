@@ -88,7 +88,7 @@ import {
 } from '../ipc';
 import './shell.css';
 
-const MOCK_COUNTS = { notes: 22, links: 48, clusters: 4 };
+const MOCK_COUNTS = { notes: 22, links: 48, clusters: 0 };
 
 export function Shell() {
   const [theme, setThemeState] = useState<Theme>(getStoredTheme);
@@ -284,7 +284,7 @@ export function Shell() {
     setClustering(true);
     setClusterError(null);
     try {
-      await recomputeClusters();
+      await recomputeClusters(false); // manual: download the model on first run if needed
     } catch (e) {
       // v2.0: a failed ~90MB model fetch is remembered backend-side; surface a Retry
       // instead of only logging it (the Retry resets the cache then re-attempts).
@@ -347,7 +347,11 @@ export function Shell() {
     try {
       const payload = await getGraphPayload();
       setGraphData(payloadToGraphData(payload));
-      setCounts({ notes: payload.nodes.length, links: payload.edges.length, clusters: 0 });
+      setCounts({
+        notes: payload.nodes.length,
+        links: payload.edges.length,
+        clusters: payload.cluster_count,
+      });
       return payload;
     } catch {
       return null;
@@ -565,6 +569,13 @@ export function Shell() {
               ? firstNotePath(payload.nodes)
               : undefined;
         if (target) openInTab(target, 'note');
+        // Auto-organize on load: open_vault's full_rebuild (clear_all_derived) wiped the
+        // clusters table, so re-cluster now. Gated in the backend (auto=true no-ops unless the
+        // model is already downloaded → opening a vault never triggers the ~90MB fetch).
+        // Fire-and-forget: the emitted index:rebuilt drives refreshGraph, which reads the new
+        // cluster_count. ponytail: full re-embed every open; incremental embeddings is the P2
+        // upgrade path.
+        recomputeClusters(true).catch((e) => console.error('auto-cluster skipped:', e));
       } catch (e) {
         console.error('open vault failed:', e);
       }
