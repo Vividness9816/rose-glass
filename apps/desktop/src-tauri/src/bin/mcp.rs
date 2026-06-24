@@ -195,6 +195,11 @@ fn tool_defs(allow_write: bool) -> Value {
                 "required": ["path"]
             }
         }),
+        json!({
+            "name": "maintenance_report",
+            "description": "Read-only vault health report: note vs embedding counts (stale flag), notes missing a summary, and orphan notes (no links in or out). Surfaces upkeep work; does not modify anything.",
+            "inputSchema": { "type": "object", "properties": {} }
+        }),
     ];
     // The write tool is advertised ONLY under --allow-write, so a default (read-only) server is
     // provably non-mutating: a client that never sees upsert_note cannot call it.
@@ -267,6 +272,10 @@ fn call_tool(
                 Err(e) => tool_err(id, &e.to_string()),
             }
         }
+        "maintenance_report" => match queries::maintenance_report(&*conn) {
+            Ok(rep) => tool_ok(id, &rep),
+            Err(e) => tool_err(id, &e.to_string()),
+        },
         "upsert_note" if allow_write => upsert_note(id, &args, conn, root),
         // Unadvertised + uncallable without the flag: a hand-rolled client that sends it anyway
         // gets method-not-found, never a write.
@@ -515,6 +524,17 @@ mod tests {
         assert_eq!(resp["result"]["isError"], false, "resp: {resp}");
         assert_eq!(resp["result"]["structuredContent"]["path"], "inbox/test-note.md");
         assert!(root.path().join("inbox/test-note.md").exists());
+    }
+
+    #[test]
+    fn maintenance_report_tool_runs() {
+        let resp = handle_request(
+            &json!({"jsonrpc":"2.0","id":70,"method":"tools/call",
+                    "params":{"name":"maintenance_report","arguments":{}}}),
+            &mut seeded(), false, std::path::Path::new("."),
+        ).unwrap();
+        assert_eq!(resp["result"]["isError"], false);
+        assert_eq!(resp["result"]["structuredContent"]["note_count"], 1);
     }
 
     #[test]

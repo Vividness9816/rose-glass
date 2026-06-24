@@ -557,6 +557,46 @@ pub fn related(conn: &Connection, path: &str, k: usize) -> rusqlite::Result<Rela
     Ok(RelatedResult { ready: true, neighbors: titles_for(conn, scored) })
 }
 
+#[derive(Serialize)]
+pub struct MaintenanceReport {
+    pub note_count: i64,
+    pub embedded_count: i64,
+    pub embeddings_stale: bool,
+    pub missing_summary: Vec<String>,
+    pub orphans: Vec<String>,
+}
+
+/// Read-only upkeep report: note vs (current-model) embedding counts (stale if they differ),
+/// notes with no frontmatter summary, and orphans (no resolved outbound AND no inbound links).
+/// Does NOT re-embed (that needs the model, app-side) — it only surfaces what to fix, per the
+/// ADR's on-demand-not-a-session-hook decision. `embedded_count` is MODEL-FILTERED (reuses
+/// embedding_freshness) so the stale flag reflects the corpus `related`/`search` actually see.
+pub fn maintenance_report(conn: &Connection) -> rusqlite::Result<MaintenanceReport> {
+    let (embedded_count, note_count) = embedding_freshness(conn, crate::embed::MODEL_NAME)?;
+    let missing_summary: Vec<String> = manifest(conn)?
+        .into_iter()
+        .filter(|e| !e.summary_present)
+        .map(|e| e.path)
+        .collect();
+    let orphans: Vec<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT n.path FROM notes n
+             WHERE NOT EXISTS (SELECT 1 FROM links l WHERE l.src_path = n.path AND l.dst_path IS NOT NULL)
+               AND NOT EXISTS (SELECT 1 FROM links l WHERE l.dst_path = n.path)
+             ORDER BY n.path",
+        )?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    Ok(MaintenanceReport {
+        note_count,
+        embedded_count,
+        embeddings_stale: embedded_count != note_count,
+        missing_summary,
+        orphans,
+    })
+}
+
 #[cfg(test)]
 mod semantic_tests {
     use super::*;
@@ -623,6 +663,22 @@ mod semantic_tests {
         assert!(r.ready);
         assert_eq!(r.neighbors.len(), 1);
         assert_eq!(r.neighbors[0].path, "b.md", "b is nearest; self excluded");
+    }
+
+    #[test]
+    fn maintenance_report_flags_orphans_and_missing_summary() {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        // a.md: has a summary + an outgoing resolved link to b.md (not an orphan)
+        conn.execute("INSERT INTO notes (path,title,frontmatter,content_hash,mtime,word_count,indexed_at) VALUES ('a.md','A','{\"summary\":\"s\"}','h',0,1,0)", []).unwrap();
+        // b.md: no summary, but an inbound link from a.md (not an orphan)
+        conn.execute("INSERT INTO notes (path,title,content_hash,mtime,word_count,indexed_at) VALUES ('b.md','B','h',0,1,0)", []).unwrap();
+        conn.execute("INSERT INTO links (src_path,dst_path,dst_raw,link_type) VALUES ('a.md','b.md','b','wikilink')", []).unwrap();
+        let r = maintenance_report(&conn).unwrap();
+        assert_eq!(r.note_count, 2);
+        assert!(r.embeddings_stale, "0 embeddings for 2 notes");
+        assert!(r.missing_summary.contains(&"b.md".to_string()));
+        assert!(!r.orphans.contains(&"b.md".to_string()), "b.md has an inbound link");
     }
 
     #[test]
