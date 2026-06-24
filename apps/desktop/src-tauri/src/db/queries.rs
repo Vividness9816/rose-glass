@@ -534,6 +534,29 @@ pub fn manifest(conn: &Connection) -> rusqlite::Result<Vec<ManifestEntry>> {
     Ok(out)
 }
 
+#[derive(Serialize)]
+pub struct RelatedResult {
+    pub ready: bool,
+    pub neighbors: Vec<SemanticHit>,
+}
+
+/// Notes most similar to `path` by cosine over STORED embeddings — MODEL-FREE (the note's own
+/// vector is already in `embeddings`, so no ONNX load). Mirrors `commands::related_notes` without
+/// its lock/telemetry wrapper. `ready=false` when no embeddings exist yet (the app hasn't run the
+/// Clusters recompute), so an empty list reads as "not ready", NOT "no neighbours". Self-excluded.
+pub fn related(conn: &Connection, path: &str, k: usize) -> rusqlite::Result<RelatedResult> {
+    let corpus = read_embeddings(conn, crate::embed::MODEL_NAME)?;
+    if corpus.is_empty() {
+        return Ok(RelatedResult { ready: false, neighbors: vec![] });
+    }
+    // The note may not be embedded yet (added since the last recompute): ready, but no neighbours.
+    let Some((_, query_vec)) = corpus.iter().find(|(p, _)| p == path).cloned() else {
+        return Ok(RelatedResult { ready: true, neighbors: vec![] });
+    };
+    let scored = crate::knn::knn(&query_vec, &corpus, k, Some(path));
+    Ok(RelatedResult { ready: true, neighbors: titles_for(conn, scored) })
+}
+
 #[cfg(test)]
 mod semantic_tests {
     use super::*;
@@ -574,6 +597,32 @@ mod semantic_tests {
         assert!(a.summary_present);
         let b = m.iter().find(|e| e.path == "b.md").unwrap();
         assert!(!b.summary_present, "b.md has no frontmatter summary");
+    }
+
+    #[test]
+    fn related_is_not_ready_with_no_embeddings() {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO notes (path,title,content_hash,mtime,word_count,indexed_at) VALUES ('a.md','A','h',0,1,0)",
+            [],
+        ).unwrap();
+        let r = related(&conn, "a.md", 5).unwrap();
+        assert!(!r.ready, "no embeddings → not ready");
+        assert!(r.neighbors.is_empty());
+    }
+
+    #[test]
+    fn related_ranks_nearest_excluding_self() {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        seed(&conn, "a.md", "A", &[1.0, 0.0, 0.0], MODEL_NAME);
+        seed(&conn, "b.md", "B", &[0.9, 0.1, 0.0], MODEL_NAME); // near a
+        seed(&conn, "c.md", "C", &[0.0, 0.0, 1.0], MODEL_NAME); // far
+        let r = related(&conn, "a.md", 1).unwrap();
+        assert!(r.ready);
+        assert_eq!(r.neighbors.len(), 1);
+        assert_eq!(r.neighbors[0].path, "b.md", "b is nearest; self excluded");
     }
 
     #[test]
