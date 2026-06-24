@@ -6,25 +6,34 @@ use crate::fs_safe::{atomic_write, safe_join};
 use crate::indexer::pipeline::{incremental, should_skip};
 use crate::indexer::IndexOutcome;
 use rusqlite::Connection;
-use std::path::Path;
+use std::path::{Component, Path};
 
 /// Assemble schema-valid markdown: YAML frontmatter (title, mandatory summary, optional tags)
-/// + body. Values are single-line (callers trim); this is the agent capture format.
+/// then the body. Values are serialized through `serde_yaml_ng` — NOT hand-formatted — so any value
+/// (a colon, '#', '[', a newline, a reserved word) is correctly quoted/escaped and the file
+/// always round-trips back to the intended title/summary/tags through the indexer's parser.
+/// (A naive `format!("title: {v}")` silently dropped the WHOLE frontmatter on ordinary inputs
+/// like "Meeting: Q3 plan" and let a newline inject sibling keys — review HIGH, both fixed here.)
 pub fn build_markdown(title: &str, summary: &str, tags: &[String], body: &str) -> String {
-    let mut fm = String::from("---\n");
-    fm.push_str(&format!("title: {}\n", title.trim()));
-    fm.push_str(&format!("summary: {}\n", summary.trim()));
+    use serde_yaml_ng::{Mapping, Value};
+    let mut map = Mapping::new();
+    map.insert(Value::String("title".into()), Value::String(title.trim().to_string()));
+    map.insert(Value::String("summary".into()), Value::String(summary.trim().to_string()));
     if !tags.is_empty() {
-        fm.push_str(&format!("tags: [{}]\n", tags.join(", ")));
+        let seq = tags.iter().map(|t| Value::String(t.clone())).collect();
+        map.insert(Value::String("tags".into()), Value::Sequence(seq));
     }
-    fm.push_str("---\n\n");
-    fm.push_str(body.trim_end());
-    fm.push('\n');
-    fm
+    // to_string emits a trailing '\n' and never a leading '---' document marker.
+    let yaml = serde_yaml_ng::to_string(&Value::Mapping(map)).unwrap_or_default();
+    format!("---\n{yaml}---\n\n{}\n", body.trim_end())
 }
 
 /// `inbox/<slug>.md` from a title: lowercase, runs of non-alphanumeric → single '-', trimmed.
 /// ASCII-only (the index has no NFC normalization — pipeline.rs:63 — so we keep names round-trippable).
+/// NOTE: this is a pure slug fn and does NOT dedup — two distinct titles can slug to the same path
+/// (e.g. "Hello World" / "Hello, World!" → inbox/hello-world.md; all-symbol titles → inbox/note.md).
+/// The CREATE-vs-UPDATE intent (and therefore collision disambiguation) lives in the caller
+/// (`upsert_note`), which must suffix-dedup new notes so a capture never clobbers a different one.
 pub fn derive_rel(title: &str) -> String {
     let mut slug = String::new();
     let mut prev_dash = false;
@@ -42,34 +51,59 @@ pub fn derive_rel(title: &str) -> String {
     format!("inbox/{slug}.md")
 }
 
-/// The single confined agent write. Rejects skip-dirs, absolute paths, and traversal, writes the
-/// markdown FILE atomically, then derives the SQLite row synchronously (the app/watcher may be
-/// down, so we must index in-process). Returns the vault-relative path actually written.
+/// The single confined agent write. Validates the path FULLY before touching the filesystem,
+/// writes the markdown FILE atomically, then derives the SQLite row synchronously (the app/watcher
+/// may be down, so we must index in-process). Returns the vault-relative path actually written.
+///
+/// Confinement order matters: every reject runs BEFORE `create_dir_all`, because that call mutates
+/// the filesystem and a `..`/absolute/backslash path would otherwise create directories outside the
+/// vault before `safe_join`'s canonical check could reject the file (review CRITICAL, fixed).
 pub fn write_note(
     conn: &mut Connection,
     root: &Path,
     rel: &str,
     content: &str,
 ) -> Result<String, String> {
+    // Forward-slash, vault-relative contract (matches normalize_rel / full_rebuild keying). Reject
+    // backslashes: should_skip splits only on '/', so "node_modules\\x.md" would dodge the skip
+    // floor, and incremental would key the row "node_modules\\x.md" while full_rebuild keys
+    // "node_modules/..."-or-skips it → A3 rebuild-equivalence breaks. Reject up front. (review HIGH)
+    if rel.contains('\\') {
+        return Err(format!("backslash not allowed in a vault path (use '/'): {rel}"));
+    }
     if should_skip(rel) {
         return Err(format!("refusing to write a skipped/invisible path: {rel}"));
     }
-    // Reject absolute/rooted paths BEFORE any FS mutation. `should_skip` catches '.'/'..' segments
-    // and skip-dirs, but not an absolute path (e.g. "/etc/x.md", "C:\\x", "\\\\unc\\x") — and the
-    // create_dir_all below would otherwise act on it before safe_join's canonical check rejects it.
-    if Path::new(rel).is_absolute() || rel.starts_with('/') || rel.starts_with('\\') {
-        return Err(format!("refusing an absolute/rooted path: {rel}"));
+    // Reject absolute / drive-rooted / drive-relative / traversing paths via path COMPONENTS before
+    // any FS mutation. Catches "/x", "C:\\x", "C:x.md" (drive-relative, NOT is_absolute on Windows),
+    // "\\\\unc\\x", and "../x" (should_skip also catches the dot forms — belt and suspenders).
+    let p = Path::new(rel);
+    let rooted_or_traversing = p.is_absolute()
+        || rel.starts_with('/')
+        || p.components().any(|c| {
+            matches!(
+                c,
+                Component::Prefix(_) | Component::RootDir | Component::ParentDir | Component::CurDir
+            )
+        });
+    if rooted_or_traversing {
+        return Err(format!("refusing an absolute/rooted/traversing path: {rel}"));
     }
-    // safe_join needs the parent dir to exist to canonicalize a NEW file; ensure inbox/ first.
+    // Path is now a clean forward-slash relative path; safe to materialize the parent dir.
     if let Some(slash) = rel.rfind('/') {
         let sub = &rel[..slash];
         std::fs::create_dir_all(root.join(sub)).map_err(|e| e.to_string())?;
     }
-    let abs = safe_join(root, rel)?; // rejects absolute, '..'/'.', symlink escape (canonical check)
+    let abs = safe_join(root, rel)?; // final canonical/symlink containment check
     atomic_write(&abs, content).map_err(|e| e.to_string())?;
     match incremental(conn, root, rel) {
         Ok(IndexOutcome::Indexed) | Ok(IndexOutcome::Skipped) => Ok(rel.to_string()),
-        Ok(other) => Err(format!("unexpected index outcome: {other:?}")),
+        // Reachable race: the file was removed (watcher/AV/user) between our write and incremental's
+        // existence check, so it deleted any row. Disk and DB stay consistent — report it clearly
+        // rather than as a generic "unexpected outcome". (review MEDIUM)
+        Ok(IndexOutcome::Deleted) => {
+            Err(format!("note vanished during write (concurrent delete): {rel}"))
+        }
         Err(e) => Err(e.to_string()),
     }
 }
@@ -77,6 +111,7 @@ pub fn write_note(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::indexer::parse_note;
 
     fn open() -> Connection {
         let conn = crate::db::open_in_memory().unwrap();
@@ -84,14 +119,39 @@ mod tests {
         conn
     }
 
+    fn fm(md: &str) -> serde_json::Value {
+        let p = parse_note("inbox/x.md", md.as_bytes());
+        serde_json::from_str(p.frontmatter_json.as_deref().unwrap()).unwrap()
+    }
+
     #[test]
-    fn build_markdown_has_mandatory_summary_frontmatter() {
+    fn build_markdown_roundtrips_title_summary_tags_through_parser() {
         let md = build_markdown("My Title", "a one line summary", &["x".into(), "y".into()], "Body text.");
         assert!(md.starts_with("---\n"));
-        assert!(md.contains("title: My Title"));
-        assert!(md.contains("summary: a one line summary"));
-        assert!(md.contains("tags: [x, y]"));
         assert!(md.trim_end().ends_with("Body text."));
+        let p = parse_note("inbox/x.md", md.as_bytes());
+        assert_eq!(p.title, "My Title");
+        let f = serde_json::from_str::<serde_json::Value>(p.frontmatter_json.as_deref().unwrap()).unwrap();
+        assert_eq!(f["summary"], "a one line summary");
+        assert_eq!(f["tags"], serde_json::json!(["x", "y"]));
+    }
+
+    #[test]
+    fn build_markdown_escapes_yaml_metachars_so_frontmatter_survives() {
+        // ': ', '[', '#' all break a naive `key: value` and would drop the WHOLE frontmatter.
+        let md = build_markdown("Meeting: Q3 plan", "[draft] #1 priority", &[], "Body: text.");
+        let p = parse_note("inbox/x.md", md.as_bytes());
+        assert_eq!(p.title, "Meeting: Q3 plan", "title with ': ' must round-trip, not vanish");
+        assert_eq!(fm(&md)["summary"], "[draft] #1 priority");
+    }
+
+    #[test]
+    fn build_markdown_neutralizes_interior_newline_injection() {
+        // An interior newline in the title must NOT inject a second `summary:` key.
+        let md = build_markdown("X\nsummary: spoofed", "real summary", &[], "body");
+        let f = fm(&md);
+        assert_eq!(f["summary"], "real summary", "injected summary must not override the real one");
+        assert!(f["title"].is_string());
     }
 
     #[test]
@@ -123,6 +183,33 @@ mod tests {
     }
 
     #[test]
+    fn write_note_rejects_backslash_paths() {
+        // backslash dodges should_skip (splits on '/') and would break A3 keying — reject it, and
+        // ensure nothing is created on disk or in the index for any of these.
+        let root = tempfile::tempdir().unwrap();
+        let mut conn = open();
+        assert!(write_note(&mut conn, root.path(), "node_modules\\evil.md", "x").is_err());
+        assert!(write_note(&mut conn, root.path(), "sub\\note.md", "x").is_err());
+        assert!(write_note(&mut conn, root.path(), "foo\\..\\..\\escape\\x.md", "x").is_err());
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 0, "no row may be derived for a rejected path");
+    }
+
+    #[test]
+    fn write_note_rejects_absolute_and_rooted() {
+        let root = tempfile::tempdir().unwrap();
+        let mut conn = open();
+        let abs = if cfg!(windows) { "C:/Windows/x.md" } else { "/etc/x.md" };
+        assert!(write_note(&mut conn, root.path(), abs, "x").is_err());
+        assert!(write_note(&mut conn, root.path(), "/leading.md", "x").is_err());
+        #[cfg(windows)]
+        assert!(
+            write_note(&mut conn, root.path(), "C:relative.md", "x").is_err(),
+            "drive-relative path must be rejected"
+        );
+    }
+
+    #[test]
     fn write_note_is_idempotent_on_path() {
         let root = tempfile::tempdir().unwrap();
         let mut conn = open();
@@ -133,5 +220,21 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM notes WHERE path='inbox/n.md'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 1, "re-write must update in place, not duplicate");
+    }
+
+    #[test]
+    fn write_note_updates_row_on_changed_content() {
+        // Pins the ADR's "load-bearing" content-hash gate in BOTH directions: skip on same content
+        // (idempotency test above) AND refresh on changed content (here).
+        let root = tempfile::tempdir().unwrap();
+        let mut conn = open();
+        write_note(&mut conn, root.path(), "inbox/n.md", "---\ntitle: First\nsummary: s\n---\n\nbody A").unwrap();
+        write_note(&mut conn, root.path(), "inbox/n.md", "---\ntitle: Second\nsummary: s\n---\n\nbody B differs").unwrap();
+        let note = crate::db::queries::get_note(&conn, "inbox/n.md").unwrap().unwrap();
+        assert_eq!(note.title, "Second", "a content change must refresh the derived row");
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM notes WHERE path='inbox/n.md'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }
