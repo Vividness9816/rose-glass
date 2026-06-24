@@ -932,4 +932,59 @@ mod tests {
         let derived = resolve_model_dir(&["--vault".into(), "v".into()], Path::new("vault"));
         assert_eq!(derived.file_name().and_then(|s| s.to_str()), Some("models"));
     }
+
+    /// Real-model E2E: reembed actually embeds + stores, the second call no-ops (skip-if-fresh),
+    /// and semantic_search ranks a CONCEPTUAL query with no keyword overlap onto the right notes —
+    /// the zero-FTS-hit hole the feature exists to close. #[ignore]d (uses the ~90MB ONNX model,
+    /// cached after first run); run with `--ignored`. Reuses the temp cache the other ignored
+    /// embed tests use.
+    #[test]
+    #[ignore = "uses the real ONNX model; run with --ignored"]
+    fn reembed_then_semantic_search_end_to_end_with_real_model() {
+        let _ = MODEL_DIR.set(std::env::temp_dir().join("rg-fastembed-cache"));
+        let mut conn = db::open_in_memory().unwrap();
+        db::migrate(&conn).unwrap();
+        for (p, t, b) in [
+            ("cooking.md", "Cooking Pasta", "boil water add salt cook the pasta al dente then drain"),
+            ("sauce.md", "Tomato Sauce", "simmer tomatoes garlic basil and olive oil into a pasta sauce"),
+            ("holes.md", "Black Holes", "a black hole bends spacetime so light cannot escape it"),
+            ("stars.md", "Neutron Stars", "a neutron star is the dense collapsed core of a massive star"),
+        ] {
+            conn.execute(
+                "INSERT INTO notes (path,title,content_hash,mtime,word_count,indexed_at) VALUES (?1,?2,'h',0,1,0)",
+                rusqlite::params![p, t],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO notes_fts (path,title,body) VALUES (?1,?2,?3)",
+                rusqlite::params![p, t, b],
+            )
+            .unwrap();
+        }
+        let call = |conn: &mut Connection, args: Value| {
+            handle_request(
+                &json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":args}),
+                conn,
+                true,
+                Path::new("."),
+            )
+            .unwrap()
+        };
+        // reembed embeds all 4
+        let r = call(&mut conn, json!({"name":"reembed","arguments":{}}));
+        assert_eq!(r["result"]["structuredContent"]["reembedded"], true, "resp {r}");
+        assert_eq!(r["result"]["structuredContent"]["embedded_after"], 4);
+        // second call is a skip-if-fresh no-op
+        let r2 = call(&mut conn, json!({"name":"reembed","arguments":{}}));
+        assert_eq!(r2["result"]["structuredContent"]["reembedded"], false, "already fresh");
+        // a conceptual query sharing NO keyword with the notes still ranks a cooking note first
+        let s = call(&mut conn, json!({"name":"semantic_search","arguments":{"query":"recipe for dinner","k":2}}));
+        assert_eq!(s["result"]["structuredContent"]["ready"], true, "resp {s}");
+        let hits = s["result"]["structuredContent"]["hits"].as_array().unwrap();
+        let top = hits.first().and_then(|h| h["path"].as_str()).unwrap_or("");
+        assert!(
+            top == "cooking.md" || top == "sauce.md",
+            "‘recipe for dinner’ (no shared keyword) should rank a cooking note top, got {top}"
+        );
+    }
 }
