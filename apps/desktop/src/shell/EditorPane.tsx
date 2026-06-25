@@ -17,6 +17,7 @@ import {
 } from '../ipc';
 import { CodeMirrorHost } from '../editor/CodeMirrorHost';
 import { Icon } from '../icons/Icon';
+import { SplitText } from '../ui/SplitText';
 import { editorKind } from '../editor/editorKind';
 import { parseOutline } from '../editor/outline';
 
@@ -292,7 +293,10 @@ export function EditorPane({
       </div>
 
       <div className="editor-body selectable">
-        <div className="note-title">{note?.title ?? 'No note open'}</div>
+        {/* key by path → the split-reveal replays each time a note opens */}
+        <div className="note-title">
+          <SplitText key={note?.path ?? 'none'} text={note?.title ?? 'No note open'} />
+        </div>
         {note && (
           <div className="note-meta">
             <span><Icon name="calendar" size={12} /> {dateStr}</span>

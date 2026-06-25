@@ -4,6 +4,7 @@
    (with an anti-clobber guard so a user's in-progress buffer is never stomped). */
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
 import { getStoredTheme, toggleTheme, type Theme } from '../appearance/theme';
 import type { GraphData } from '../graph/types';
 import { payloadToGraphData } from '../graph/fromPayload';
@@ -102,6 +103,7 @@ export function Shell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false); // v2.3 Help overlay
   const [paletteQuery, setPaletteQuery] = useState<string | undefined>(undefined); // pre-fill (tag search)
+  const reduceMotion = useReducedMotion(); // terminal drawer slide honors prefers-reduced-motion
   const [terminalOpen, setTerminalOpen] = useState(false); // is the terminal drawer VISIBLE
   const [terminals, setTerminals] = useState<number[]>([]); // open tab ids — each is a live PTY kept alive while hidden
   const [activeTerm, setActiveTerm] = useState(-1);
@@ -925,15 +927,23 @@ export function Shell() {
           <HelpOverlay onClose={() => setHelpOpen(false)} />
         </Suspense>
       )}
-      {/* Once opened, the drawer stays MOUNTED so its PTYs keep running; Ctrl+` just
-          hides it (display:none). Each tab is a keyed TerminalPane — only the active one
-          shows, the rest stay alive hidden. The tab × unmounts → kills that PTY. */}
+      {/* Once opened, the drawer stays MOUNTED so its PTYs keep running; Ctrl+` slides it
+          up/down (translateY+opacity only — height stays --rg-term-h so the resize splitter is
+          untouched). `inert` when closed removes it from focus/pointer; the absolute overlay is
+          clipped by .app-shell's overflow:hidden. Each tab is a keyed TerminalPane — only the
+          active one shows; the tab × unmounts → kills that PTY. */}
       {terminals.length > 0 && (
-        <div
+        <motion.div
           className="terminal-drawer"
           ref={drawerRef}
-          style={
-            { display: terminalOpen ? 'flex' : 'none', ['--rg-term-h']: `${drawerHeightPx}px` } as CSSProperties
+          inert={!terminalOpen}
+          style={{ ['--rg-term-h']: `${drawerHeightPx}px` } as CSSProperties}
+          initial={{ y: '100%', opacity: 0 }}
+          animate={{ y: terminalOpen ? '0%' : '100%', opacity: terminalOpen ? 1 : 0 }}
+          transition={
+            reduceMotion
+              ? { duration: 0 }
+              : { type: 'spring', stiffness: 420, damping: 38, opacity: { duration: 0.18 } }
           }
         >
           <Splitter
@@ -1038,7 +1048,7 @@ export function Shell() {
               ))}
             </Suspense>
           </div>
-        </div>
+        </motion.div>
       )}
     </div>
     </>
