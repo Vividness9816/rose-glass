@@ -11,9 +11,9 @@ Code directly.
 
 ## Status
 
-**Latest: v2.5.1** (branch `fix/motion-override` @ `0.5.1`; signed NSIS, Verified publisher: Dylan N —
-not yet merged/tagged). The full per-phase + per-release ledger lives in **[STATUS.md](STATUS.md)** /
-**[ROADMAP.md](ROADMAP.md)**; founding decisions are in `~/.claude/second-brain/decisions/`.
+**Latest: v2.5.1** (tag `v2.5.1` @ `0.5.1`; signed NSIS, Verified publisher: Dylan N). The full
+per-phase + per-release ledger lives in **[STATUS.md](STATUS.md)** / **[ROADMAP.md](ROADMAP.md)**;
+founding decisions are in `~/.claude/second-brain/decisions/`.
 
 - **v1.0** (tag `v1.0`): shell, vault indexer + SQLite/FTS5 + watcher, CodeMirror 6 editor, ⌘K
   search, living backdrop + glass, embedded terminal, CC activity mirror (M1 transcript-tail),

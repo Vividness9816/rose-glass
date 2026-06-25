@@ -60,7 +60,7 @@ with a riskiest-premise spike on a tiny scope before its build.
   staggered Notes/Tags list reveal, Count Up statusbar metrics, a per-word Split Text note-title reveal,
   and a slide open/close on the Ctrl+\` terminal. Token-driven + reduced-motion-aware; one new dep
   (`motion`). See STATUS.md "v2.5.0". Gates: tsc 0 · vite build 0 (Rust untouched).
-- **v2.5.1** (branch `fix/motion-override`; signed NSIS/MSI @ `0.5.1`, not yet merged/tagged) — bug-fix: the
+- **v2.5.1** (merge `9b77a63`, tag `v2.5.1` @ `0.5.1`; signed NSIS/MSI) — bug-fix: the
   v2.5.0 effects all gated on `prefers-reduced-motion` (= Windows' "Animation effects" toggle), so they
   vanished when it was off. Added a **Settings → Animations** override (Follow system / Always on / Off,
   default system) routing every motion reader through one hook + `<html data-reduce-motion>`; also fixed

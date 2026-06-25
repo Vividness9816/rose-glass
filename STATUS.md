@@ -173,8 +173,8 @@ app (WebView2 caches it per-process; needs a full restart), and `GraphPane` read
 - **Gates:** vitest **122** (+ `appearance/motion.test.ts`) · tsc 0 · vite build 0. **3-lens adversarial
   review = ship / 0 findings** (a11y fail-mode: `index.html` has only `<div id=root>` so no static gated
   markup + `initMotion` runs before first paint → no fail-open; CSS specificity; completeness/no-cycle).
-  Signed 0.5.1 NSIS + MSI built + `Get-AuthenticodeSignature` Valid, CN=Dylan N. Branch pushed-pending —
-  NOT yet merged/tagged.
+  Signed 0.5.1 NSIS + MSI built + `Get-AuthenticodeSignature` Valid, CN=Dylan N. **Merged to master**
+  (merge `9b77a63`) + **tagged `v2.5.1`**; branch deleted.
 
 ## Phase 12 — §20 acceptance gate PASSED → v1.0 (2026-06-18)
 **All 11 §20 rows ✅ proven.** A3/A4/A7/A9/A10 were headless/test-proven earlier; the 6
