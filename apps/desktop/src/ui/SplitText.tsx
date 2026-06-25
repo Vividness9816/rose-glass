@@ -4,10 +4,11 @@
    Replay-on-change is the caller's job: key the element (e.g. by note path) so opening a note
    remounts it and the reveal plays again. */
 
-import { motion, useReducedMotion } from 'motion/react';
+import { motion } from 'motion/react';
+import { useReduceMotion } from '../appearance/useReduceMotion';
 
 export function SplitText({ text, className }: { text: string; className?: string }) {
-  const reduce = useReducedMotion();
+  const reduce = useReduceMotion();
   if (reduce) return <span className={className}>{text}</span>;
 
   // Split on whitespace but KEEP the separators (the capture group) so spacing survives exactly.

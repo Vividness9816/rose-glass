@@ -10,10 +10,13 @@ import '@fontsource/jetbrains-mono/500.css';
 import './tokens/tokens.css';
 import './styles/global.css';
 import { initTheme } from './appearance/theme';
+import { initMotion } from './appearance/motion';
+import { loadSettings } from './settings/settings';
 import { Shell } from './shell/Shell';
 import { SettingsProvider } from './settings/SettingsContext';
 
 initTheme(); // apply persisted theme before first paint
+initMotion(loadSettings().motion); // reflect the motion pref to <html> before first paint
 
 // Cursor-tracked border glow on action buttons (reactbits BorderGlow, button-scaled): one
 // delegated listener sets --gx/--gy on the hovered button; the glow ring itself is pure CSS

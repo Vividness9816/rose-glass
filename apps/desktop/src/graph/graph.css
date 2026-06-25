@@ -228,13 +228,11 @@
   outline: 1px solid var(--rose);
   outline-offset: 1px;
 }
-@media (prefers-reduced-motion: reduce) {
-  .gcfg-panel {
-    animation: none;
-  }
-  .gcfg-gear,
-  .gcfg-x,
-  .gcfg-swatch {
-    transition: none;
-  }
+:root[data-reduce-motion='1'] .gcfg-panel {
+  animation: none;
+}
+:root[data-reduce-motion='1'] .gcfg-gear,
+:root[data-reduce-motion='1'] .gcfg-x,
+:root[data-reduce-motion='1'] .gcfg-swatch {
+  transition: none;
 }

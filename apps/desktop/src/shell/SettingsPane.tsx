@@ -102,6 +102,17 @@ export function SettingsPane({
               {theme === 'dark' ? 'Dark' : 'Light'} — switch
             </button>
           </div>
+          <Select
+            label="Animations"
+            hint="Motion & effects (DotField, dock, count-up, reveals…). “Follow system” honors Windows’ reduced-motion setting; “Always on” keeps them regardless"
+            value={s.motion}
+            options={[
+              { value: 'system', label: 'Follow system' },
+              { value: 'on', label: 'Always on' },
+              { value: 'off', label: 'Off' },
+            ]}
+            onChange={(v) => set({ motion: v })}
+          />
           <div className="sp-field">
             <div className="sp-field-label">Vault</div>
             <div className="sp-field-value">{vault}</div>

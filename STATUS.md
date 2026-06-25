@@ -151,6 +151,31 @@ verified live in the browser (vite, mock graph, BOTH themes).
 - **Gates:** tsc 0 · vite build 0 (Rust/cargo untouched — frontend-only). Live-verified both themes:
   Count Up lands 22/48/8, title reveals, the terminal slides up on Ctrl+\` and back down.
 
+## v2.5.1 — in-app motion override (2026-06-25)
+**v2.5.1** (branch `fix/motion-override`, commits `85ed311` + `80b6aa0`; bump `0.5.0`→`0.5.1`; signed 0.5.1
+NSIS + MSI, CN=Dylan N). Bug-fix. The v2.5.0 effects above all read `prefers-reduced-motion`, which on
+Windows IS the "Animation effects" toggle (Settings → Accessibility → Visual effects) — users flip it for
+snappiness, not only accessibility. With it OFF, WebView2 reports reduce=true and all six correctly
+self-disabled (not a build regression). Confirmed via Win32 `SPI_GETCLIENTAREAANIMATION` (exactly what
+Chromium/WebView2 reads); two gotchas surfaced — toggling the OS setting ON does NOT fix an already-running
+app (WebView2 caches it per-process; needs a full restart), and `GraphPane` read the value once in a
+`useState` initializer so DotField could never recover on a live change.
+- **One source of truth** (`src/appearance/motion.ts` + `useReduceMotion.ts`, mirrors `theme.ts`'s
+  defined-once pattern): combines the OS signal with a new persisted **Animations** setting and reflects the
+  result onto `<html data-reduce-motion>`. EVERY reader routes through it — the four `motion/react`
+  `useReducedMotion()` consumers (IconRail/CountUp/SplitText/Shell), GraphPane's canvas `matchMedia`, the
+  Backdrop, and all six CSS `@media (prefers-reduced-motion)` blocks (flattened to `:root[data-reduce-motion='1']`
+  descendant rules — higher specificity + later source order, verified).
+- **Settings → General → Animations:** Follow system / Always on / Off (default **Follow system** — the prior
+  accessibility behavior is byte-for-byte preserved; enum-guarded in `mergeSettings`). **"Always on"** makes
+  `resolveReduceMotion('on',…)=false` unconditionally → motion regardless of the OS toggle or any WebView2
+  staleness. Also fixes DotField's once-read bug (now live via `useSyncExternalStore`).
+- **Gates:** vitest **122** (+ `appearance/motion.test.ts`) · tsc 0 · vite build 0. **3-lens adversarial
+  review = ship / 0 findings** (a11y fail-mode: `index.html` has only `<div id=root>` so no static gated
+  markup + `initMotion` runs before first paint → no fail-open; CSS specificity; completeness/no-cycle).
+  Signed 0.5.1 NSIS + MSI built + `Get-AuthenticodeSignature` Valid, CN=Dylan N. Branch pushed-pending —
+  NOT yet merged/tagged.
+
 ## Phase 12 — §20 acceptance gate PASSED → v1.0 (2026-06-18)
 **All 11 §20 rows ✅ proven.** A3/A4/A7/A9/A10 were headless/test-proven earlier; the 6
 live-window rows (A1/A2/A5/A6/A8/A11) are now confirmed by the **user's live walkthrough**

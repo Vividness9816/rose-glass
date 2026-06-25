@@ -3,10 +3,11 @@
    statusbar metrics (notes / links / clusters), which actually change as the index updates. */
 
 import { useEffect, useRef } from 'react';
-import { useMotionValue, useSpring, useReducedMotion } from 'motion/react';
+import { useMotionValue, useSpring } from 'motion/react';
+import { useReduceMotion } from '../appearance/useReduceMotion';
 
 export function CountUp({ value, className }: { value: number; className?: string }) {
-  const reduce = useReducedMotion();
+  const reduce = useReduceMotion();
   const ref = useRef<HTMLSpanElement>(null);
   const mv = useMotionValue(0);
   const spring = useSpring(mv, { mass: 0.8, stiffness: 70, damping: 18 });

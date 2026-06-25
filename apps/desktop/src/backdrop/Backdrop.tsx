@@ -14,25 +14,13 @@
      4. any shader/render failure → static gradient (error boundary).
    pointer-events: none throughout → never intercepts shell interaction. */
 
-import { Component, lazy, Suspense, type ReactNode, useSyncExternalStore } from 'react';
+import { Component, lazy, Suspense, type ReactNode } from 'react';
 import type { Theme } from '../appearance/theme';
+import { useReduceMotion } from '../appearance/useReduceMotion';
 import { hasWebGL2, prefersStaticBackdrop } from './logic';
 import './backdrop.css';
 
 const ShaderBackdrop = lazy(() => import('./ShaderBackdrop'));
-
-/** prefers-reduced-motion as a tear-free subscription (the correct React primitive — no effect). */
-function useReducedMotion(): boolean {
-  return useSyncExternalStore(
-    (cb) => {
-      const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-      mq.addEventListener('change', cb);
-      return () => mq.removeEventListener('change', cb);
-    },
-    () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-    () => false,
-  );
-}
 
 /** The always-safe layer: a static, fully token-driven gradient (theme-aware via CSS vars). */
 function StaticBackdrop() {
@@ -54,7 +42,7 @@ class BackdropBoundary extends Component<{ children: ReactNode }, { failed: bool
 }
 
 export function Backdrop({ theme }: { theme: Theme }) {
-  const reduced = useReducedMotion();
+  const reduced = useReduceMotion();
   // §17: static (never the lazy WebGL canvas) when motion is reduced OR no WebGL2.
   // The WebGL2 probe closes the renderer-construction-failure gap the error boundary
   // can't (r3f builds the renderer in an uncaught async promise — see logic.ts).

@@ -60,11 +60,9 @@
 }
 /* Reduced motion: drop the morph/pulse but keep the static emerald square — never gate the
    state's legibility on animation. */
-@media (prefers-reduced-motion: reduce) {
-  .terminal-dot { transition: none; }
-  .terminal-tab .terminal-dot.attn,
-  .terminal-tab.active .terminal-dot.attn { animation: none; }
-}
+:root[data-reduce-motion='1'] .terminal-dot { transition: none; }
+:root[data-reduce-motion='1'] .terminal-tab .terminal-dot.attn,
+:root[data-reduce-motion='1'] .terminal-tab.active .terminal-dot.attn { animation: none; }
 .terminal-tab-rename {
   background: var(--surface-1);
   border: 1px solid var(--border-mid);
@@ -223,10 +221,8 @@
 .terminal-copied.show {
   opacity: 1;
 }
-@media (prefers-reduced-motion: reduce) {
-  .terminal-copied {
-    transition: none;
-  }
+:root[data-reduce-motion='1'] .terminal-copied {
+  transition: none;
 }
 
 /* xterm paints its own background; let the glass drawer show by keeping the viewport clear */
