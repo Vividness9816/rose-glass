@@ -71,6 +71,37 @@
   background: var(--rose-glow-sm);
   border-color: var(--border-mid);
 }
+
+/* List reveal (reactbits AnimatedContent → CSS): rows fade + rise in, lightly staggered, when a
+   pane mounts (Notes/Tags open). Pure CSS so content is never gated on a JS class — it animates an
+   already-visible default (impeccable motion rule); reduced-motion shows it instantly. */
+@keyframes sp-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.sp-list .sp-row {
+  animation: sp-row-in var(--dur-norm) var(--ease-out) backwards;
+}
+.sp-list .sp-row:nth-child(1) { animation-delay: 0ms; }
+.sp-list .sp-row:nth-child(2) { animation-delay: 22ms; }
+.sp-list .sp-row:nth-child(3) { animation-delay: 44ms; }
+.sp-list .sp-row:nth-child(4) { animation-delay: 66ms; }
+.sp-list .sp-row:nth-child(5) { animation-delay: 88ms; }
+.sp-list .sp-row:nth-child(6) { animation-delay: 110ms; }
+.sp-list .sp-row:nth-child(7) { animation-delay: 132ms; }
+.sp-list .sp-row:nth-child(8) { animation-delay: 154ms; }
+.sp-list .sp-row:nth-child(n + 9) { animation-delay: 176ms; }
+@media (prefers-reduced-motion: reduce) {
+  .sp-list .sp-row {
+    animation: none;
+  }
+}
 .sp-row-title {
   font-size: 13px;
   color: var(--text-1);

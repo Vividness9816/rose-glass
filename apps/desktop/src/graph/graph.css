@@ -80,6 +80,18 @@
   display: block;
 }
 
+/* DotField background — fills the canvas area BEHIND the (transparent) graph canvas, below the
+   header. Never intercepts pan/zoom/hover (DotField tracks the window, not this layer). */
+.graph-dotfield {
+  position: absolute;
+  top: 36px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
 /* bottom-fade gradient (mockup .graph-pane::after) */
 .graph-fade {
   content: '';

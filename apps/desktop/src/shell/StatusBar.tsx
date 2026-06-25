@@ -3,6 +3,7 @@
    live toggle. Counts are mock until the indexer lands. */
 
 import type { Theme } from '../appearance/theme';
+import { CountUp } from '../ui/CountUp';
 
 interface Props {
   notes: number;
@@ -19,9 +20,9 @@ export function StatusBar({ notes, links, clusters, theme, onToggleTheme }: Prop
         <div className="sb-dot" /> Live
       </div>
       <div className="sb-sep">·</div>
-      <div className="sb-item">{notes} notes</div>
-      <div className="sb-item">{links} links</div>
-      <div className="sb-item">{clusters} clusters</div>
+      <div className="sb-item"><CountUp value={notes} /> notes</div>
+      <div className="sb-item"><CountUp value={links} /> links</div>
+      <div className="sb-item"><CountUp value={clusters} /> clusters</div>
       <div className="sb-right">
         <button className="sb-item sb-theme" type="button" onClick={onToggleTheme}>
           {theme === 'dark' ? 'Dark' : 'Light'}

@@ -1,7 +1,18 @@
 /* 52px icon rail (mockup .sidebar). Active = rose-glow bg + 2px left indicator.
-   Controlled by Shell: clicking Activity swaps the right pane to the Activity
-   mirror (Phase 8); other items just move the highlight until their pane lands. */
+   v2.4.1: dock-style VERTICAL magnification (reactbits Dock, adapted row→column) — items
+   grow as the cursor nears them, springy. Reduced-motion pins them to base size.
+   Controlled by Shell: clicking Activity swaps the right pane to the Activity mirror. */
 
+import { useRef } from 'react';
+import {
+  motion,
+  useMotionValue,
+  useSpring,
+  useTransform,
+  useReducedMotion,
+  type MotionValue,
+  type SpringOptions,
+} from 'motion/react';
 import { Icon, type IconName } from '../icons/Icon';
 
 interface RailItem {
@@ -22,27 +33,60 @@ const BOTTOM: RailItem[] = [
   { id: 'settings', icon: 'settings', title: 'Settings' },
 ];
 
-export function IconRail({
+const BASE = 34; // resting size (matches .sb-icon)
+const MAG = 46; // magnified size (< 52px rail so it never overflows the column)
+const DISTANCE = 90; // px of vertical proximity over which magnification falls off
+const SPRING: SpringOptions = { mass: 0.1, stiffness: 150, damping: 12 };
+
+function RailButton({
+  it,
   active,
   onSelect,
+  mouseY,
+  peak,
 }: {
-  active: string;
+  it: RailItem;
+  active: boolean;
   onSelect: (id: string) => void;
+  mouseY: MotionValue<number>;
+  peak: number; // MAG normally, BASE under reduced-motion
 }) {
-  const renderItem = (it: RailItem) => (
-    <button
-      key={it.id}
-      className={`sb-icon${active === it.id ? ' active' : ''}`}
+  const ref = useRef<HTMLButtonElement>(null);
+  const distance = useTransform(mouseY, (v) => {
+    const rect = ref.current?.getBoundingClientRect();
+    const center = rect ? rect.y + rect.height / 2 : 0;
+    return v - center;
+  });
+  const target = useTransform(distance, [-DISTANCE, 0, DISTANCE], [BASE, peak, BASE]);
+  const size = useSpring(target, SPRING);
+  return (
+    <motion.button
+      ref={ref}
+      style={{ width: size, height: size }}
+      className={`sb-icon${active ? ' active' : ''}`}
       title={it.title}
       aria-label={it.title}
       type="button"
       onClick={() => onSelect(it.id)}
     >
       <Icon name={it.icon} size="md" />
-    </button>
+    </motion.button>
+  );
+}
+
+export function IconRail({ active, onSelect }: { active: string; onSelect: (id: string) => void }) {
+  const reduce = useReducedMotion();
+  const peak = reduce ? BASE : MAG;
+  const mouseY = useMotionValue(Infinity);
+  const renderItem = (it: RailItem) => (
+    <RailButton key={it.id} it={it} active={active === it.id} onSelect={onSelect} mouseY={mouseY} peak={peak} />
   );
   return (
-    <div className="sidebar">
+    <div
+      className="sidebar"
+      onMouseMove={(e) => mouseY.set(e.pageY)}
+      onMouseLeave={() => mouseY.set(Infinity)}
+    >
       {TOP.map(renderItem)}
       <div className="sb-spacer" />
       {BOTTOM.map(renderItem)}

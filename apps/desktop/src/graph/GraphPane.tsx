@@ -2,7 +2,8 @@ import { memo, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import type { Theme } from '../appearance/theme';
 import type { GraphData } from './types';
 import { buildMockGraph } from './mockGraph';
-import { resolveGraphTheme } from './themeColors';
+import { resolveGraphTheme, rgba } from './themeColors';
+import { DotField } from './DotField';
 import { loadConfig, saveConfig, type GraphConfig } from './config';
 import { GraphConfigPanel } from './GraphConfigPanel';
 import { GraphRenderer } from './GraphRenderer';
@@ -11,6 +12,19 @@ import { WebGpuGraphRenderer } from './webgpu/WebGpuGraphRenderer';
 import { probeWebGpu } from './webgpu/probe';
 import { Icon } from '../icons/Icon';
 import './graph.css';
+
+/** DotField colors resolved from the token layer (canvas can't read var()): violet dots →
+ *  rose, glow rose. Recomputed on theme change so light/dark stay token-driven (A10). */
+function deriveDotColors() {
+  const t = resolveGraphTheme();
+  // Alphas are tuned to read THROUGH the renderer's 0.4 near-black field (GraphRenderer
+  // GRAPH_BG_ALPHA) — ~0.6 transmits, so the source alpha is set high to land subtle-but-present.
+  return {
+    gradientFrom: rgba(t.activityRead, 0.55), // --violet
+    gradientTo: rgba(t.activityModify, 0.42), // --rose
+    glowColor: rgba(t.activityModify, 0.32),
+  };
+}
 
 // Persisted GPU/2D renderer preference.
 const GPU_KEY = 'rose-glass:graph-gpu';
@@ -76,6 +90,16 @@ function GraphPaneInner({
   const [config, setConfig] = useState<GraphConfig>(() => loadConfig());
   const configRef = useRef(config);
   configRef.current = config;
+
+  // DotField background (behind the graph canvas). Skipped entirely under reduced-motion —
+  // it's decorative, so no-motion is the correct treatment, and it spares the RAF.
+  const [reduceMotion] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  );
+  const [dotColors, setDotColors] = useState(deriveDotColors);
+  useEffect(() => {
+    setDotColors(deriveDotColors());
+  }, [theme]);
 
   // Probe WebGPU once (adapter+device actually obtainable), not just navigator.gpu.
   useEffect(() => {
@@ -329,6 +353,19 @@ function GraphPaneInner({
           </button>
         </div>
       </div>
+      {/* DotField sits behind the (transparent) graph canvas; pointer-events:none so it never
+          steals pan/zoom. Decorative → omitted under reduced-motion. */}
+      {!reduceMotion && (
+        <DotField
+          className="graph-dotfield"
+          gradientFrom={dotColors.gradientFrom}
+          gradientTo={dotColors.gradientTo}
+          glowColor={dotColors.glowColor}
+          dotSpacing={16}
+          bulgeStrength={50}
+          glowRadius={140}
+        />
+      )}
       {/* key by backend: toggling remounts a FRESH canvas so the 2D fallback never
           inherits a canvas already committed to 'webgpu' (getContext('2d') → null). */}
       <canvas key={gpuOn ? 'gpu' : '2d'} ref={canvasRef} className="graph-canvas" />
