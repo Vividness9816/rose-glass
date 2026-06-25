@@ -125,6 +125,47 @@
 }
 .sb-spacer { flex: 1; }
 
+/* ── Cursor-tracked border glow on action buttons (reactbits BorderGlow, button-scaled) ──
+   --gx/--gy are set by the delegated pointermove listener in main.tsx; the ring is masked to
+   the 1px border so the glow tracks the cursor along the edge. Excludes the rail (it's a dock
+   now) and the titlebar window controls, per the integration decision. */
+.gc-btn,
+.tb-btn,
+.ea-btn {
+  position: relative;
+  isolation: isolate;
+}
+.gc-btn::after,
+.tb-btn::after,
+.ea-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: radial-gradient(60px circle at var(--gx, -200px) var(--gy, -200px), var(--rose-bright), transparent 65%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity var(--dur-norm) var(--ease);
+  pointer-events: none;
+  z-index: 1;
+}
+.gc-btn:hover:not(:disabled)::after,
+.tb-btn:hover:not(:disabled)::after,
+.ea-btn:hover:not(:disabled)::after {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gc-btn::after,
+  .tb-btn::after,
+  .ea-btn::after {
+    transition: none;
+  }
+}
+
 /* ── Main split ── */
 /* --rg-split (graph's share, 0..1) is set inline by the Shell from the persisted/clamped
    value and driven imperatively while dragging the .splitter-x seam. */
