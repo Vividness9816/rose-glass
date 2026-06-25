@@ -11,7 +11,7 @@ Code directly.
 
 ## Status
 
-**Latest: v2.4.1** (tag `v2.4.1` @ `0.4.1`; signed NSIS, Verified publisher: Dylan N). The full
+**Latest: v2.5.0** (tag `v2.5.0` @ `0.5.0`; signed NSIS, Verified publisher: Dylan N). The full
 per-phase + per-release ledger lives in **[STATUS.md](STATUS.md)** / **[ROADMAP.md](ROADMAP.md)**;
 founding decisions are in `~/.claude/second-brain/decisions/`.
 
@@ -29,6 +29,12 @@ founding decisions are in `~/.claude/second-brain/decisions/`.
   navigates and captures the vault through the `rose-glass-mcp` stdio sidecar (see below) — and
   (v2.4.1) on-demand **`reembed`** + free-text **`semantic_search`** over MCP
   (ADR-20260624-rose-glass-mcp-freshness-semantic).
+- **v2.5.0** (`feat/reactbits-ui`): a [reactbits.dev](https://reactbits.dev) visual layer — a
+  cursor-reactive **DotField** behind the graph, dock-style **magnification** on the icon rail,
+  cursor-tracked **border-glow** on action buttons, a staggered **list reveal** on Notes/Tags,
+  **Count Up** statusbar metrics, a per-word **Split Text** note-title reveal, and a **slide**
+  open/close on the Ctrl+\` terminal — all token-driven and reduced-motion-aware (one new dep,
+  `motion`).
 
 ## Stack
 

@@ -125,6 +125,32 @@ embedding-freshness gap that left `related` returning `ready:false` in app-close
   a real-model E2E proving `reembed` then `semantic_search("recipe for dinner")` — zero keyword overlap
   — ranks a cooking note top) · clippy clean · tsc 0 · vite build 0. `docs/agent-interface.md` updated.
 
+## v2.5.0 — reactbits.dev visual layer
+**v2.5.0** (merge of `feat/reactbits-ui`, tag `v2.5.0` @ `0.5.0`; signed 0.5.0 NSIS, CN=Dylan N).
+A frontend-only polish pass integrating seven [reactbits.dev](https://reactbits.dev) components via
+`/impeccable` — fit decided per-component, NOT literal drop-ins (most reactbits would be slop in this
+design language). All token-driven + reduced-motion-aware; one new dep (`motion`), no gsap. Each
+verified live in the browser (vite, mock graph, BOTH themes).
+- **DotField** behind the graph — cursor-reactive dot grid (ported to strict TS); colors resolved from
+  tokens (`resolveGraphTheme`); `pointer-events:none` so it never steals pan/zoom; omitted under
+  reduced-motion; alpha tuned to read through the renderer's 0.4 field.
+- **Dock magnify** on the 52px icon rail — adapted row→column with `motion` springs (34→46px, fits the
+  rail), reduced-motion pins to base; kept the rail layout + rose active indicator.
+- **Border-glow** on action buttons — button-scaled cursor-tracked ring (one delegated pointermove
+  listener feeds `--gx/--gy` to a masked `::after` on `.gc-btn`/`.tb-btn`/`.ea-btn`); excludes the rail
+  (now a dock) + the titlebar window controls.
+- **List reveal** on Notes/Tags — staggered fade+rise on `.sp-row` mount (CSS, visible-by-default — no
+  JS-gated visibility, so no blank-pane risk).
+- **Count Up** statusbar metrics (motion spring, 0→value, delta on change), **Split Text** per-word
+  note-title reveal (keyed by path → replays per open; aria-label keeps it screen-reader-correct), and
+  a **terminal slide** on Ctrl+\` (translateY+opacity only, so the height-resize splitter is untouched;
+  `inert` when closed).
+- **Decisions (via AskUserQuestion):** Dock = vertical-on-the-rail (not a bottom bar); BorderGlow =
+  button-scaled adaptation (not the full conic-mask card on ~40 buttons). Deferred by the user: a full
+  BorderGlow glow-CARD on a floating surface; extending the button-glow to every button family.
+- **Gates:** tsc 0 · vite build 0 (Rust/cargo untouched — frontend-only). Live-verified both themes:
+  Count Up lands 22/48/8, title reveals, the terminal slides up on Ctrl+\` and back down.
+
 ## Phase 12 — §20 acceptance gate PASSED → v1.0 (2026-06-18)
 **All 11 §20 rows ✅ proven.** A3/A4/A7/A9/A10 were headless/test-proven earlier; the 6
 live-window rows (A1/A2/A5/A6/A8/A11) are now confirmed by the **user's live walkthrough**

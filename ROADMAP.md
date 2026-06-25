@@ -54,6 +54,12 @@ with a riskiest-premise spike on a tiny scope before its build.
   single mode-aware `db::open_indexed` connection constructor. The flagged "FK-off bug" was a false alarm
   (bundled SQLite defaults FK ON). See STATUS.md "v2.4 + v2.4.1". Gates: cargo 98+31 (incl. real-model
   E2E) · tsc/vitest/build 0.
+- **v2.5.0** (merge of `feat/reactbits-ui`, tag `v2.5.0` @ `0.5.0`; signed NSIS) — a frontend-only
+  [reactbits.dev](https://reactbits.dev) visual layer via `/impeccable`: cursor-reactive DotField behind
+  the graph, dock magnification on the icon rail, cursor-tracked border-glow on action buttons, a
+  staggered Notes/Tags list reveal, Count Up statusbar metrics, a per-word Split Text note-title reveal,
+  and a slide open/close on the Ctrl+\` terminal. Token-driven + reduced-motion-aware; one new dep
+  (`motion`). See STATUS.md "v2.5.0". Gates: tsc 0 · vite build 0 (Rust untouched).
 
 ## Active frontier (historical — pre-v1.0 round-2 feedback, 2026-06-17 PM)
 ~~Primary: GPU shader parity~~ ✅ **DONE** (Phase 4 row above — GPU-visual parity + Focus + inversion,
