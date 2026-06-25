@@ -47,6 +47,13 @@ with a riskiest-premise spike on a tiny scope before its build.
   `upsert_note` under `--allow-write` (inbox-only, file-first, A3-safe). 6 phases, two 3-lens reviews,
   E2E stdio proof. See STATUS.md "Agent interface (MCP) shipped" + `docs/agent-interface.md`. Gates:
   cargo 96+22 · vitest 119 · tsc/build 0.
+- **v2.4 / v2.4.1** (tag `v2.4` @ `0.4.0`, then merge `dc86f21` / tag `v2.4.1` @ `0.4.1`; signed NSIS;
+  ADR-20260624-rose-glass-mcp-freshness-semantic) — released the agent interface, then closed the
+  embedding-freshness gap: on-demand **`reembed`** (full-corpus recompute, skip-if-fresh) + free-text
+  **`semantic_search`** over MCP, both `--allow-write`-only (the model loads only in write mode), plus a
+  single mode-aware `db::open_indexed` connection constructor. The flagged "FK-off bug" was a false alarm
+  (bundled SQLite defaults FK ON). See STATUS.md "v2.4 + v2.4.1". Gates: cargo 98+31 (incl. real-model
+  E2E) · tsc/vitest/build 0.
 
 ## Active frontier (historical — pre-v1.0 round-2 feedback, 2026-06-17 PM)
 ~~Primary: GPU shader parity~~ ✅ **DONE** (Phase 4 row above — GPU-visual parity + Focus + inversion,

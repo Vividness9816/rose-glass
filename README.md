@@ -11,30 +11,24 @@ Code directly.
 
 ## Status
 
-**v1.0 shipped** (tag `v1.0`): shell, vault indexer + SQLite/FTS5 + watcher, CodeMirror 6 editor,
-⌘K search, living backdrop + glass, embedded terminal, CC activity mirror (M1 transcript-tail),
-WebGPU graph renderer, read-only MCP sidecar, neural clusters, semantic search, and the
-**lossless-only editor engines** (PDF view-only + Word view/edit-as-Markdown-sibling).
+**Latest: v2.4.1** (tag `v2.4.1` @ `0.4.1`; signed NSIS, Verified publisher: Dylan N). The full
+per-phase + per-release ledger lives in **[STATUS.md](STATUS.md)** / **[ROADMAP.md](ROADMAP.md)**;
+founding decisions are in `~/.claude/second-brain/decisions/`.
 
-**v2.0** (branch `feat/v2.0`) adds:
-
-- **Drag-and-drop ingest** — drop a file on the window; it's copied into `inbox/` (if outside the
-  vault), indexed (md/txt become graph nodes), and opened in the right pane.
-- **Customizable graph** — an expandable panel (top-right of the graph) tunes gravity, node
-  strength, movement, liveliness, per-cluster colors, and free-float vs fixed mode; persisted.
-- **Home-dir-scale indexing** — the `ignore` crate + a shared skip floor across every index path,
-  so opening `~` indexes the real notes, not `node_modules`/build junk.
-- **Embedding durability** — the model is cached in app state; a failed fetch is remembered with a
-  **Retry** affordance (no silent re-download); search latency is surfaced; a model swap purges
-  stale vectors.
-- **Hardening** — a real CSP, a canonicalized vault root for activity scope, a bounded/coalesced
-  watcher, a pre-attach terminal ring buffer (no lost first prompt), and a documented
-  **[threat model](docs/THREAT-MODEL.md)** (the terminal is intentional RCE by design).
-- **Signed installer** — `tauri build` emits a code-signed NSIS/MSI (Verified publisher: Dylan N).
-
-See **[ROADMAP.md](ROADMAP.md)** / **[STATUS.md](STATUS.md)** for phase + acceptance detail, the
-v2.0 design under **[docs/superpowers/specs](docs/superpowers/specs/)**, and the founding decisions
-in `~/.claude/second-brain/decisions/` (notably `ADR-20260618-rose-glass-v2-architecture`).
+- **v1.0** (tag `v1.0`): shell, vault indexer + SQLite/FTS5 + watcher, CodeMirror 6 editor, ⌘K
+  search, living backdrop + glass, embedded terminal, CC activity mirror (M1 transcript-tail),
+  WebGPU graph renderer, read-only MCP sidecar, neural clusters, semantic search, and the
+  **lossless-only editor engines** (PDF view-only + Word view/edit-as-Markdown-sibling).
+- **v2.0 – v2.3** (PRs #1–#3): drag-drop ingest · customizable graph · home-dir-scale indexing ·
+  embedding durability · real CSP + **[threat model](docs/THREAT-MODEL.md)** · signed NSIS/MSI ·
+  terminal clipboard + PowerShell default + attention indicator · resizable panels · solar-system
+  graph physics · curated in-repo icon set · Obsidian-feel hover graph · categorized settings
+  (vim / spellcheck / auto-pair / smart-lists / HTML→MD paste) · reading mode · multi-document tabs ·
+  in-app Help.
+- **v2.4 / v2.4.1** (PR #4 + `feat/mcp-fk-and-reembed`): the **agent interface** — Claude Code
+  navigates and captures the vault through the `rose-glass-mcp` stdio sidecar (see below) — and
+  (v2.4.1) on-demand **`reembed`** + free-text **`semantic_search`** over MCP
+  (ADR-20260624-rose-glass-mcp-freshness-semantic).
 
 ## Stack
 
@@ -62,9 +56,12 @@ Rose Glass ships a stdio MCP sidecar (`rose-glass-mcp`) so Claude Code can navig
 into the vault through tools instead of ripgrep + file reads — it works even when the app is closed
 (the client spawns it). Read tools: `search`, `get_note`, `manifest` (whole-vault triage),
 `related` (model-free semantic neighbours), `get_semantic_clusters`, `maintenance_report`. Under an
-opt-in `--allow-write` flag it also gains `upsert_note` — the one write path, confined to
-`inbox/*.md`, file-first so the SQLite row stays derived (A3 holds). Read-only by default is
-provable: without the flag the DB opens read-only and the write tool is never advertised. See
+opt-in `--allow-write` flag it also gains: `upsert_note` — the one write path, confined to
+`inbox/*.md`, file-first so the SQLite row stays derived (A3 holds); **`reembed`** — recompute the
+vault's embeddings so `related`/`semantic_search` work (no-op when already fresh); and
+**`semantic_search`** — free-text semantic ranking by meaning, not keywords. The embedding model
+loads **only** in `--allow-write` mode, so read-only by default is provable: without the flag the DB
+opens read-only, no model is loaded, and the write/model tools are never advertised. See
 **[docs/agent-interface.md](docs/agent-interface.md)** for the tool list, the `--check` doctor, and
 a copy-pasteable `.mcp.json`.
 

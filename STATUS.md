@@ -95,7 +95,35 @@ phases, 14 atomic commits, **two 3-lens adversarial reviews** (Phase 1 + Phases 
   `docs/proof/agent-interface-mcp-session.txt` (a JSON-RPC session: `upsert_note` → the new note is
   immediately surfaced by `search`/`get_note`/`manifest` through the pipe). README + `docs/agent-interface.md` added.
 - **Deferred (documented):** `manifest` result cap (a LIMIT would silently truncate a whole-vault triage
-  list); free-text-semantic-over-MCP + RRF (needs the model in the sidecar — ADR). Commits `d169f60..2997475`, merged to master via `78b4c6b` (PR #4).
+  list); free-text-semantic-over-MCP + RRF (needs the model in the sidecar — ADR). Commits `d169f60..2997475`, merged to master via `78b4c6b` (PR #4). *(free-text-semantic-over-MCP since shipped in v2.4.1 — see below.)*
+
+## v2.4 + v2.4.1 — releases + agent semantic search over MCP
+**v2.4** (tag `v2.4` @ `0.4.0`, bump `8603cee`; signed 0.4.0 NSIS, CN=Dylan N) — cut the first release
+off the merged agent interface (PR #4 above): the `rose-glass-mcp` sidecar shipped in a signed NSIS
+installer + a GitHub release with the asset.
+
+**v2.4.1** (merge `dc86f21`, tag `v2.4.1` @ `0.4.1`; signed 0.4.1 NSIS; built on `feat/mcp-fk-and-reembed`
+via /council 5-seat/2-round → TDD; **ADR-20260624-rose-glass-mcp-freshness-semantic**). Closes the
+embedding-freshness gap that left `related` returning `ready:false` in app-closed agent sessions
+(embeddings are written only by the app's manual Clusters button), and adds free-text semantic search.
+- **`reembed`** (`--allow-write`) — full-corpus recompute reusing the SINGLE embedding writer
+  `cluster::store_clusters` (no second/incremental write-semantics); a **skip-if-fresh** guard
+  short-circuits BEFORE loading the ~90MB model; returns `{reembedded, note_count, embedded_before,
+  embedded_after, model}`.
+- **`semantic_search(query)`** (`--allow-write`) — free-text semantic ranking (embed the query +
+  cosine over stored vectors, reusing the pure `knn`). Advertised **only** under `--allow-write`, so the
+  default read-only sidecar stays provably model-free. `ready:false` until `reembed` has run.
+- **`db::open_indexed(path, Mode)`** — one mode-aware connection constructor; the sidecar now opens its
+  DB the same way as the app/tests (FK ON + busy_timeout; WAL/synchronous when read-write). NOTE: a
+  flagged "FK-off bug" was a **FALSE ALARM** — the bundled SQLite (`libsqlite3-sys`,
+  `SQLITE_DEFAULT_FOREIGN_KEYS=1`) already defaults FK ON (proven by test); this is defensive hardening,
+  NOT a corruption fix (v2.4 never orphaned rows).
+- **Deferred (per ADR):** RRF hybrid fusion (the agent blends the two ranked lists itself), incremental
+  embedding on the watcher (ADR-20260618 forbids ONNX in the hot save path), frontmatter-lint /
+  inbox-rollup mutators.
+- **Gates green:** `cargo test --lib` **98** + `--bin rose-glass-mcp` **31** (10 new model-free tests +
+  a real-model E2E proving `reembed` then `semantic_search("recipe for dinner")` — zero keyword overlap
+  — ranks a cooking note top) · clippy clean · tsc 0 · vite build 0. `docs/agent-interface.md` updated.
 
 ## Phase 12 — §20 acceptance gate PASSED → v1.0 (2026-06-18)
 **All 11 §20 rows ✅ proven.** A3/A4/A7/A9/A10 were headless/test-proven earlier; the 6
