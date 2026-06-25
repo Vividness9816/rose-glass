@@ -158,12 +158,10 @@
 .ea-btn:hover:not(:disabled)::after {
   opacity: 1;
 }
-@media (prefers-reduced-motion: reduce) {
-  .gc-btn::after,
-  .tb-btn::after,
-  .ea-btn::after {
-    transition: none;
-  }
+:root[data-reduce-motion='1'] .gc-btn::after,
+:root[data-reduce-motion='1'] .tb-btn::after,
+:root[data-reduce-motion='1'] .ea-btn::after {
+  transition: none;
 }
 
 /* ── Main split ── */

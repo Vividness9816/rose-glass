@@ -4,7 +4,8 @@
    (with an anti-clobber guard so a user's in-progress buffer is never stomped). */
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { motion, useReducedMotion } from 'motion/react';
+import { motion } from 'motion/react';
+import { useReduceMotion } from '../appearance/useReduceMotion';
 import { getStoredTheme, toggleTheme, type Theme } from '../appearance/theme';
 import type { GraphData } from '../graph/types';
 import { payloadToGraphData } from '../graph/fromPayload';
@@ -103,7 +104,7 @@ export function Shell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false); // v2.3 Help overlay
   const [paletteQuery, setPaletteQuery] = useState<string | undefined>(undefined); // pre-fill (tag search)
-  const reduceMotion = useReducedMotion(); // terminal drawer slide honors prefers-reduced-motion
+  const reduceMotion = useReduceMotion(); // terminal drawer slide honors the central motion source
   const [terminalOpen, setTerminalOpen] = useState(false); // is the terminal drawer VISIBLE
   const [terminals, setTerminals] = useState<number[]>([]); // open tab ids — each is a live PTY kept alive while hidden
   const [activeTerm, setActiveTerm] = useState(-1);

@@ -9,11 +9,11 @@ import {
   useMotionValue,
   useSpring,
   useTransform,
-  useReducedMotion,
   type MotionValue,
   type SpringOptions,
 } from 'motion/react';
 import { Icon, type IconName } from '../icons/Icon';
+import { useReduceMotion } from '../appearance/useReduceMotion';
 
 interface RailItem {
   id: string;
@@ -75,7 +75,7 @@ function RailButton({
 }
 
 export function IconRail({ active, onSelect }: { active: string; onSelect: (id: string) => void }) {
-  const reduce = useReducedMotion();
+  const reduce = useReduceMotion();
   const peak = reduce ? BASE : MAG;
   const mouseY = useMotionValue(Infinity);
   const renderItem = (it: RailItem) => (

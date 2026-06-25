@@ -97,10 +97,8 @@
 .sp-list .sp-row:nth-child(7) { animation-delay: 132ms; }
 .sp-list .sp-row:nth-child(8) { animation-delay: 154ms; }
 .sp-list .sp-row:nth-child(n + 9) { animation-delay: 176ms; }
-@media (prefers-reduced-motion: reduce) {
-  .sp-list .sp-row {
-    animation: none;
-  }
+:root[data-reduce-motion='1'] .sp-list .sp-row {
+  animation: none;
 }
 .sp-row-title {
   font-size: 13px;

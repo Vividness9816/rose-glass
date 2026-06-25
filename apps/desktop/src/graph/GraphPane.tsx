@@ -4,6 +4,7 @@ import type { GraphData } from './types';
 import { buildMockGraph } from './mockGraph';
 import { resolveGraphTheme, rgba } from './themeColors';
 import { DotField } from './DotField';
+import { useReduceMotion } from '../appearance/useReduceMotion';
 import { loadConfig, saveConfig, type GraphConfig } from './config';
 import { GraphConfigPanel } from './GraphConfigPanel';
 import { GraphRenderer } from './GraphRenderer';
@@ -92,10 +93,9 @@ function GraphPaneInner({
   configRef.current = config;
 
   // DotField background (behind the graph canvas). Skipped entirely under reduced-motion —
-  // it's decorative, so no-motion is the correct treatment, and it spares the RAF.
-  const [reduceMotion] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-  );
+  // it's decorative, so no-motion is the correct treatment, and it spares the RAF. Reads the
+  // central motion source (live: honors the OS signal AND the in-app Animations setting).
+  const reduceMotion = useReduceMotion();
   const [dotColors, setDotColors] = useState(deriveDotColors);
   useEffect(() => {
     setDotColors(deriveDotColors());

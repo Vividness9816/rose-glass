@@ -3,7 +3,11 @@
    CodeMirrorHost via compartments; the two tab-dependent fields are stored now but only
    take effect once tabs (leg 4) + reading mode (leg 3) land. */
 
+import { DEFAULT_MOTION, MOTION_PREFS, type MotionPref } from '../appearance/motion';
+
 export interface Settings {
+  // Appearance
+  motion: MotionPref;
   // Editor — tab-dependent (stored now; wired in legs 3/4)
   alwaysFocusNewTabs: boolean;
   defaultView: 'edit' | 'read';
@@ -19,6 +23,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  motion: DEFAULT_MOTION,
   alwaysFocusNewTabs: true,
   defaultView: 'edit',
   spellcheck: true,
@@ -43,6 +48,8 @@ export function mergeSettings(raw: unknown): Settings {
     ...p,
     // enum guard: anything but 'read' resolves to the default 'edit'
     defaultView: p.defaultView === 'read' ? 'read' : DEFAULT_SETTINGS.defaultView,
+    // enum guard: an unknown/missing motion pref resolves to the default 'system'
+    motion: MOTION_PREFS.includes(p.motion as MotionPref) ? (p.motion as MotionPref) : DEFAULT_MOTION,
   };
 }
 
