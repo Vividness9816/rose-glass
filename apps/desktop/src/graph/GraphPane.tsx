@@ -17,10 +17,12 @@ import './graph.css';
  *  rose, glow rose. Recomputed on theme change so light/dark stay token-driven (A10). */
 function deriveDotColors() {
   const t = resolveGraphTheme();
+  // Alphas are tuned to read THROUGH the renderer's 0.4 near-black field (GraphRenderer
+  // GRAPH_BG_ALPHA) — ~0.6 transmits, so the source alpha is set high to land subtle-but-present.
   return {
-    gradientFrom: rgba(t.activityRead, 0.34), // --violet
-    gradientTo: rgba(t.activityModify, 0.22), // --rose
-    glowColor: rgba(t.activityModify, 0.2),
+    gradientFrom: rgba(t.activityRead, 0.55), // --violet
+    gradientTo: rgba(t.activityModify, 0.42), // --rose
+    glowColor: rgba(t.activityModify, 0.32),
   };
 }
 
